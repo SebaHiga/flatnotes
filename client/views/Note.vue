@@ -83,6 +83,14 @@
             class="absolute right-1 h-1.5 w-1.5 rounded-full bg-theme-brand"
           ></div>
         </CustomButton>
+        <!-- Vim Mode Toggle -->
+        <Toggle
+          v-show="editMode && canModify"
+          label="Vim"
+          :isOn="vimModeEnabled"
+          class="ml-1"
+          @click="toggleVimModeHandler"
+        />
         <!-- Edit Toggle -->
         <Toggle
           v-if="canModify"
@@ -103,8 +111,19 @@
         :initialValue="note.content"
         class="toast-viewer pb-4"
       />
+      <CodeMirrorEditor
+        v-else-if="vimModeEnabled"
+        ref="toastEditor"
+        :initialValue="getInitialEditorValue()"
+        @change="startContentChangedTimeout"
+        @keydown="keydownHandler"
+        @file-drop="fileDropHandler"
+        @save="saveHandler(false)"
+        @save-and-close="saveHandler(true)"
+        @quit="closeHandler"
+      />
       <ToastEditor
-        v-if="editMode"
+        v-else
         ref="toastEditor"
         :initialValue="getInitialEditorValue()"
         :initialEditType="loadDefaultEditorMode()"
@@ -144,6 +163,7 @@ import {
   updateNote,
 } from "../api.js";
 import { Note } from "../classes.js";
+import CodeMirrorEditor from "../components/codemirror/CodeMirrorEditor.vue";
 import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomButton from "../components/CustomButton.vue";
 import LoadingIndicator from "../components/LoadingIndicator.vue";
@@ -177,6 +197,8 @@ const newTitle = ref();
 const toast = useToast();
 const toastEditor = ref();
 const unsavedChanges = ref(false);
+const vimModeEnabled = ref(loadVimModeEnabled());
+const pendingEditorContent = ref(null);
 
 function init() {
   // Return if we already have the note e.g. When we rename a note, the route prop would change but we’d already have the note.
@@ -238,8 +260,28 @@ function setEditMode() {
 }
 
 function getInitialEditorValue() {
+  if (pendingEditorContent.value !== null) {
+    const content = pendingEditorContent.value;
+    pendingEditorContent.value = null;
+    return content;
+  }
   const draftContent = loadDraft();
   return draftContent ? draftContent : note.value.content;
+}
+
+// Vim Mode
+function toggleVimModeHandler() {
+  // Carry the in-progress content over to the other editor rather than
+  // losing it when switching mid-edit.
+  if (toastEditor.value) {
+    pendingEditorContent.value = toastEditor.value.getMarkdown();
+  }
+  vimModeEnabled.value = !vimModeEnabled.value;
+  localStorage.setItem("vimModeEnabled", vimModeEnabled.value);
+}
+
+function loadVimModeEnabled() {
+  return localStorage.getItem("vimModeEnabled") === "true";
 }
 
 // Note History

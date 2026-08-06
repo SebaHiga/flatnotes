@@ -7,7 +7,7 @@ import Editor from "@toast-ui/editor";
 import { onMounted, ref } from "vue";
 
 import baseOptions from "./baseOptions.js";
-import { isImageFile } from "../../helpers.js";
+import { getFilesFromEvent, isImageFile } from "../../helpers.js";
 
 const props = defineProps({
   initialValue: String,
@@ -49,11 +49,6 @@ onMounted(() => {
   editorElement.value.addEventListener("paste", interceptFileEvent, true);
   editorElement.value.addEventListener("drop", interceptFileEvent, true);
 });
-
-function getFilesFromEvent(event) {
-  const dataTransfer = event.clipboardData || event.dataTransfer;
-  return dataTransfer?.files?.length ? Array.from(dataTransfer.files) : [];
-}
 
 function interceptFileEvent(event) {
   const files = getFilesFromEvent(event);

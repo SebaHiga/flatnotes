@@ -2,6 +2,11 @@ export function isImageFile(file) {
   return file.type.startsWith("image/");
 }
 
+export function getFilesFromEvent(event) {
+  const dataTransfer = event.clipboardData || event.dataTransfer;
+  return dataTransfer?.files?.length ? Array.from(dataTransfer.files) : [];
+}
+
 export function parseUnifiedDiff(diffText) {
   if (!diffText) return [];
   return diffText
