@@ -253,9 +253,10 @@ export async function createAttachment(file, onProgress) {
     const formData = new FormData();
     formData.append("file", file);
     const response = await api.post("api/attachments", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      // Note: no explicit Content-Type header here — the browser needs to
+      // set multipart/form-data itself so it can include the boundary
+      // parameter. A hardcoded header without one makes the server unable
+      // to parse the body ("Missing boundary in multipart").
       onUploadProgress: onProgress
         ? (event) => onProgress(event.loaded, event.total)
         : undefined,

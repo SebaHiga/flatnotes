@@ -4,7 +4,22 @@ export function isImageFile(file) {
 
 export function getFilesFromEvent(event) {
   const dataTransfer = event.clipboardData || event.dataTransfer;
-  return dataTransfer?.files?.length ? Array.from(dataTransfer.files) : [];
+  if (!dataTransfer) {
+    return [];
+  }
+  if (dataTransfer.files?.length) {
+    return Array.from(dataTransfer.files);
+  }
+  // Safari doesn't reliably populate `.files` for a pasted file (e.g. one
+  // copied in Finder then pasted with Cmd+V), even though `.items` has it
+  // — fall back to pulling File objects out of the DataTransferItemList.
+  if (dataTransfer.items?.length) {
+    return Array.from(dataTransfer.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+  }
+  return [];
 }
 
 export function parseUnifiedDiff(diffText) {

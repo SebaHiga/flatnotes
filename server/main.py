@@ -333,12 +333,19 @@ def post_chat(data: chat.ChatRequest):
         )
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
+    references = note_storage.get_attachment_references()
+    attachment_filenames = [
+        filename
+        for filename, titles in references.items()
+        if note.title in titles
+    ]
     return StreamingResponse(
         chat.stream_chat_response(
             global_config.ollama_host,
             global_config.ollama_model,
             data.question,
             note,
+            attachment_filenames,
         ),
         media_type="application/x-ndjson",
     )

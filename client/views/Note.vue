@@ -40,9 +40,9 @@
 
   <LoadingIndicator ref="loadingIndicator" class="flex h-full flex-col">
     <!-- Header -->
-    <div class="flex flex-col-reverse md:flex-row md:items-baseline">
+    <div class="flex flex-col">
       <!-- Title -->
-      <div class="grow truncate text-3xl leading-[1.6em]">
+      <div class="text-3xl leading-[1.6em] break-words">
         <span v-show="!editMode" :title="note.title">{{ note.title }}</span>
         <input
           v-show="editMode"
@@ -53,60 +53,77 @@
       </div>
 
       <!-- Buttons -->
-      <div class="flex shrink-0 self-end md:self-baseline print:hidden">
-        <!-- History Button -->
-        <CustomButton
-          v-show="!isNewNote"
-          label="History"
-          :iconPath="mdiHistory"
-          @click="historyHandler"
-        />
-        <!-- Delete Button -->
-        <CustomButton
-          v-show="canModify && !isNewNote"
-          label="Delete"
-          :iconPath="mdilDelete"
-          class="ml-1"
-          @click="deleteHandler"
-        />
-        <!-- Save Button -->
-        <CustomButton
-          v-show="editMode"
-          label="Save"
-          :iconPath="mdilContentSave"
-          @click="saveHandler((close = false))"
-          class="relative ml-1"
-        >
-          <!-- Unsaved Changes Indicator -->
-          <div
-            v-show="unsavedChanges"
-            class="absolute right-1 h-1.5 w-1.5 rounded-full bg-theme-brand"
-          ></div>
-        </CustomButton>
-        <!-- Vim Mode Toggle -->
-        <Toggle
-          v-show="editMode && canModify"
-          label="Vim"
-          :isOn="vimModeEnabled"
-          class="ml-1"
-          @click="toggleVimModeHandler"
-        />
-        <!-- Chat Toggle -->
-        <Toggle
-          v-show="showChatToggle"
-          label="Chat"
-          :isOn="chatPanelOpen"
-          class="ml-1"
-          @click="chatPanelOpen = !chatPanelOpen"
-        />
-        <!-- Edit Toggle -->
-        <Toggle
-          v-if="canModify"
-          label="Edit"
-          :isOn="editMode"
-          class="ml-1"
-          @click="toggleEditModeHandler"
-        />
+      <div class="flex flex-col items-end gap-1 print:hidden">
+        <!-- Toggles Row -->
+        <div class="flex gap-1">
+          <!-- Vim Mode Toggle -->
+          <Toggle
+            v-show="editMode && canModify"
+            label="Vim"
+            :isOn="vimModeEnabled"
+            @click="toggleVimModeHandler"
+          />
+          <!-- Chat Toggle -->
+          <Toggle
+            v-show="showChatToggle"
+            label="Chat"
+            :isOn="chatPanelOpen"
+            @click="chatPanelOpen = !chatPanelOpen"
+          />
+          <!-- Edit Toggle -->
+          <Toggle
+            v-if="canModify"
+            label="Edit"
+            :isOn="editMode"
+            @click="toggleEditModeHandler"
+          />
+        </div>
+
+        <!-- Actions Row -->
+        <div class="flex gap-1">
+          <!-- History Button -->
+          <CustomButton
+            v-show="!isNewNote"
+            label="History"
+            :iconPath="mdiHistory"
+            @click="historyHandler"
+          />
+          <!-- Delete Button -->
+          <CustomButton
+            v-show="canModify && !isNewNote"
+            label="Delete"
+            :iconPath="mdilDelete"
+            @click="deleteHandler"
+          />
+          <!-- Save Button -->
+          <CustomButton
+            v-show="editMode"
+            label="Save"
+            :iconPath="mdilContentSave"
+            @click="saveHandler((close = false))"
+            class="relative"
+          >
+            <!-- Unsaved Changes Indicator -->
+            <div
+              v-show="unsavedChanges"
+              class="absolute right-1 h-1.5 w-1.5 rounded-full bg-theme-brand"
+            ></div>
+          </CustomButton>
+          <!-- Attach File -->
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            class="hidden"
+            @change="fileInputHandler"
+          />
+          <CustomButton
+            v-show="editMode && canModify"
+            label="Attach"
+            :iconPath="mdilPaperclip"
+            @click="fileInput.click()"
+          />
+        </div>
       </div>
     </div>
 
@@ -148,7 +165,11 @@
         v-if="chatPanelOpen && showChatToggle"
         class="w-full shrink-0 border-theme-border pl-4 md:w-96 md:border-l print:hidden"
       >
-        <ChatPanel :key="note.title" :noteTitle="note.title" />
+        <ChatPanel
+          :key="note.title"
+          :noteTitle="note.title"
+          :onApplyEdit="applyChatEdit"
+        />
       </div>
     </div>
   </LoadingIndicator>
@@ -166,7 +187,7 @@
 
 <script setup>
 import { mdiHistory, mdiNoteOffOutline } from "@mdi/js";
-import { mdilContentSave, mdilDelete } from "@mdi/light-js";
+import { mdilContentSave, mdilDelete, mdilPaperclip } from "@mdi/light-js";
 import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
@@ -214,6 +235,7 @@ const isDraftModalVisible = ref(false);
 const isNewNote = computed(() => !props.title);
 const loadingIndicator = ref();
 const note = ref({});
+const fileInput = ref();
 const reservedFilenameCharacters = /[<>:"/\\|?*]/;
 const router = useRouter();
 const newTitle = ref();
@@ -305,6 +327,33 @@ function toggleVimModeHandler() {
 
 function loadVimModeEnabled() {
   return localStorage.getItem("vimModeEnabled") === "true";
+}
+
+// Chat
+async function applyChatEdit(newContent) {
+  if (editMode.value) {
+    toast.add(
+      getToastOptions(
+        "Finish or discard your current edits before applying an AI edit.",
+        "Cannot Apply",
+        "error",
+      ),
+    );
+    return false;
+  }
+  try {
+    const data = await updateNote(
+      note.value.title,
+      note.value.title,
+      newContent,
+    );
+    note.value = data;
+    toast.add(getToastOptions("Note updated by AI ✓", "Success", "success"));
+    return true;
+  } catch (error) {
+    noteSaveFailure(error);
+    return false;
+  }
 }
 
 // Note History
@@ -510,6 +559,17 @@ function postAttachment(file) {
         apiErrorHandler(error, toast);
       }
     });
+}
+
+// File Upload via the "Attach" button. Provided as a reliable alternative
+// to drag/drop and paste, since iPadOS Safari doesn't reliably deliver
+// non-image files (e.g. PDFs) dragged in from the Files app.
+function fileInputHandler(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = "";
+  if (files.length > 0) {
+    fileDropHandler(files);
+  }
 }
 
 // File Upload (non-image drag/drop/paste, and mixed batches)

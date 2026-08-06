@@ -13,16 +13,44 @@
         class="mb-4 flex"
         :class="{ 'justify-end': message.role === 'user' }"
       >
-        <p
-          class="max-w-[85%] whitespace-pre-wrap rounded-md px-3 py-2"
+        <div
+          class="max-w-full rounded-md px-3 py-2"
           :class="{
             'bg-theme-background-elevated': message.role === 'user',
             'text-theme-danger': message.error,
           }"
         >
-          {{ message.content
-          }}<span v-if="message.streaming" class="animate-pulse">▍</span>
-        </p>
+          <p v-if="message.content" class="whitespace-pre-wrap">{{
+            message.content
+          }}<span v-if="message.streaming" class="animate-pulse"
+            >▍</span
+          ></p>
+
+          <!-- Proposed Edit -->
+          <div v-if="message.edit" class="mt-2 max-w-[420px]">
+            <p class="mb-1 text-xs font-bold uppercase text-theme-text-muted">
+              Proposed Edit
+            </p>
+            <NoteHistoryDiff :diffText="message.edit.diff" />
+            <div v-if="!message.edit.resolved" class="mt-2 flex gap-1">
+              <CustomButton
+                label="Apply"
+                :style="'success'"
+                :disabled="message.edit.applying"
+                @click="applyEdit(message)"
+              />
+              <CustomButton
+                label="Discard"
+                :style="'danger'"
+                :disabled="message.edit.applying"
+                @click="message.edit.resolved = true"
+              />
+            </div>
+            <p v-else class="mt-2 text-xs text-theme-text-muted">
+              {{ message.edit.applied ? "Applied ✓" : "Discarded" }}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -55,9 +83,13 @@ import { nextTick, ref } from "vue";
 import { apiErrorHandler, streamChat } from "../api.js";
 import { useGlobalStore } from "../globalStore.js";
 import CustomButton from "./CustomButton.vue";
+import NoteHistoryDiff from "./NoteHistoryDiff.vue";
 
 const props = defineProps({
   noteTitle: { type: String, required: true },
+  // async (newContent) => boolean. Persists a proposed edit and reports
+  // back whether it succeeded.
+  onApplyEdit: { type: Function, required: true },
 });
 
 const globalStore = useGlobalStore();
@@ -78,6 +110,7 @@ async function send() {
   const assistantMessage = {
     role: "assistant",
     content: "",
+    edit: null,
     streaming: true,
     error: false,
   };
@@ -88,6 +121,14 @@ async function send() {
     await streamChat(askedQuestion, props.noteTitle, (event) => {
       if (event.type === "token") {
         assistantMessage.content += event.content;
+      } else if (event.type === "edit") {
+        assistantMessage.edit = {
+          content: event.content,
+          diff: event.diff,
+          applying: false,
+          resolved: false,
+          applied: false,
+        };
       } else if (event.type === "error") {
         assistantMessage.error = true;
         assistantMessage.content = event.message;
@@ -108,6 +149,14 @@ async function send() {
     sending.value = false;
     scrollToBottom();
   }
+}
+
+async function applyEdit(message) {
+  message.edit.applying = true;
+  const success = await props.onApplyEdit(message.edit.content);
+  message.edit.applying = false;
+  message.edit.resolved = true;
+  message.edit.applied = success;
 }
 
 function scrollToBottom() {
