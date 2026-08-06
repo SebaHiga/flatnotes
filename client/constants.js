@@ -18,3 +18,5 @@ export const authTypes = {
   password: "password",
   totp: "totp",
 };
+
+export const attachmentUrlPrefix = "attachments/";

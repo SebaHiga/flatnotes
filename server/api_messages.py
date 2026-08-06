@@ -10,3 +10,6 @@ attachment_not_found = "The specified attachment cannot be found."
 invalid_attachment_filename = (
     "The specified filename contains invalid characters."
 )
+attachment_in_use = (
+    "Cannot delete attachment. It is still linked to one or more notes."
+)

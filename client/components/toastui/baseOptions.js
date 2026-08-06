@@ -1,5 +1,6 @@
 import codeSyntaxHighlight from "@toast-ui/editor-plugin-code-syntax-highlight/dist/toastui-editor-plugin-code-syntax-highlight-all.js";
 import router from "../../router.js";
+import { attachmentUrlPrefix } from "../../constants.js";
 
 const customHTMLRenderer = {
   // Add id attribute to headings
@@ -27,6 +28,11 @@ const customHTMLRenderer = {
           hash: href,
         };
         original.attributes.href = router.resolve(targetRoute).href;
+      } else if (href.startsWith(attachmentUrlPrefix)) {
+        // Open attachment links (e.g. uploaded PDFs) in a new tab so a
+        // single click doesn't navigate away from the note.
+        original.attributes.target = "_blank";
+        original.attributes.rel = "noopener noreferrer";
       }
     }
     return original;

@@ -103,6 +103,7 @@
         :addImageBlobHook="addImageBlobHook"
         @change="startContentChangedTimeout"
         @keydown="keydownHandler"
+        @file-drop="fileDropHandler"
       />
     </div>
   </LoadingIndicator>
@@ -143,7 +144,7 @@ import ToastEditor from "../components/toastui/ToastEditor.vue";
 import ToastViewer from "../components/toastui/ToastViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
-import { getToastOptions } from "../helpers.js";
+import { formatFileSize, getToastOptions, isImageFile } from "../helpers.js";
 import { isCurrentTokenStored } from "../tokenStorage.js";
 
 const props = defineProps({
@@ -380,13 +381,30 @@ function postAttachment(file) {
     return;
   }
 
-  // Uploading Toast
-  toast.add(getToastOptions("Uploading attachment..."));
+  // Uploading Toast (updated in place as upload progress comes in)
+  let progressMessage;
+  const showProgress = (loaded, total) => {
+    if (progressMessage) {
+      toast.remove(progressMessage);
+    }
+    const detail = total
+      ? `${formatFileSize(loaded)} / ${formatFileSize(total)} (${Math.round(
+          (loaded / total) * 100,
+        )}%)`
+      : `${formatFileSize(loaded)} uploaded`;
+    progressMessage = {
+      ...getToastOptions(detail, `Uploading ${file.name}...`),
+      life: 0,
+    };
+    toast.add(progressMessage);
+  };
+  showProgress(0, file.size);
 
   // Upload the attachment
-  return createAttachment(file)
+  return createAttachment(file, showProgress)
     .then((data) => {
       // Success Toast
+      toast.remove(progressMessage);
       toast.add(
         getToastOptions(
           "Attachment uploaded successfully ✓",
@@ -397,6 +415,7 @@ function postAttachment(file) {
       return data;
     })
     .catch((error) => {
+      toast.remove(progressMessage);
       if (error.response?.status === 409) {
         // Note: The current implementation will append a datetime to the filename if it already exists.
         // Error Toast
@@ -413,6 +432,27 @@ function postAttachment(file) {
         apiErrorHandler(error, toast);
       }
     });
+}
+
+// File Upload (non-image drag/drop/paste, and mixed batches)
+async function fileDropHandler(files) {
+  const results = await Promise.all(files.map((file) => postAttachment(file)));
+
+  let isFirstInsertion = true;
+  results.forEach((data, index) => {
+    if (!data) return;
+    if (!isFirstInsertion) {
+      toastEditor.value.insertNewline();
+    }
+    isFirstInsertion = false;
+
+    const file = files[index];
+    if (isImageFile(file)) {
+      toastEditor.value.insertAttachmentImage(data.filename, data.url);
+    } else {
+      toastEditor.value.insertAttachmentLink(data.filename, data.url);
+    }
+  });
 }
 
 // Content Change Watcher

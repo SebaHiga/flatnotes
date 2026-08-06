@@ -2,6 +2,7 @@ import os
 import shutil
 import urllib.parse
 from datetime import datetime
+from typing import List
 
 from fastapi import UploadFile
 from fastapi.responses import FileResponse
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse
 from helpers import get_env, is_valid_filename
 
 from ..base import BaseAttachments
-from ..models import AttachmentCreateResponse
+from ..models import AttachmentCreateResponse, AttachmentInfo
 
 
 class FileSystemAttachments(BaseAttachments):
@@ -41,6 +42,31 @@ class FileSystemAttachments(BaseAttachments):
         if not os.path.isfile(filepath):
             raise FileNotFoundError(f"'{filename}' not found.")
         return FileResponse(filepath)
+
+    def list(self) -> List[AttachmentInfo]:
+        """List all attachments."""
+        attachments = []
+        for filename in sorted(os.listdir(self.storage_path)):
+            filepath = os.path.join(self.storage_path, filename)
+            if not os.path.isfile(filepath):
+                continue
+            attachments.append(
+                AttachmentInfo(
+                    filename=filename,
+                    url=self._url_for_filename(filename),
+                    size=os.path.getsize(filepath),
+                    last_modified=os.path.getmtime(filepath),
+                )
+            )
+        return attachments
+
+    def delete(self, filename: str) -> None:
+        """Delete a specific attachment."""
+        is_valid_filename(filename)
+        filepath = os.path.join(self.storage_path, filename)
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(f"'{filename}' not found.")
+        os.remove(filepath)
 
     def _save_file(self, file: UploadFile):
         filepath = os.path.join(self.storage_path, file.filename)

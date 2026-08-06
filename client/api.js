@@ -140,7 +140,24 @@ export async function getTags() {
   }
 }
 
-export async function createAttachment(file) {
+export async function getAttachments() {
+  try {
+    const response = await api.get("api/attachments");
+    return response.data;
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function deleteAttachment(filename) {
+  try {
+    await api.delete(`api/attachments/${encodeURIComponent(filename)}`);
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function createAttachment(file, onProgress) {
   try {
     const formData = new FormData();
     formData.append("file", file);
@@ -148,6 +165,9 @@ export async function createAttachment(file) {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      onUploadProgress: onProgress
+        ? (event) => onProgress(event.loaded, event.total)
+        : undefined,
     });
     return response.data;
   } catch (response) {

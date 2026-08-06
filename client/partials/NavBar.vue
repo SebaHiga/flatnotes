@@ -27,6 +27,7 @@ import {
   mdilMenu,
   mdilMonitor,
   mdilNoteMultiple,
+  mdilPaperclip,
   mdilPlusCircle,
 } from "@mdi/light-js";
 import { computed, ref } from "vue";
@@ -68,6 +69,11 @@ const menuItems = [
           [params.sortBy]: searchSortOptions.title,
         },
       }),
+  },
+  {
+    label: "Attachments",
+    icon: mdilPaperclip,
+    command: () => router.push({ name: "attachments" }),
   },
   {
     label: "Toggle Theme",

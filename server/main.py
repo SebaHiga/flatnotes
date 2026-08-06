@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 import api_messages
 from attachments.base import BaseAttachments
-from attachments.models import AttachmentCreateResponse
+from attachments.models import AttachmentCreateResponse, AttachmentInfo
 from auth.base import BaseAuth
 from auth.models import Login, Token
 from global_config import AuthType, GlobalConfig, GlobalConfigResponseModel
@@ -33,6 +33,7 @@ replace_base_href("client/dist/index.html", global_config.path_prefix)
 @router.get("/search", include_in_schema=False)
 @router.get("/new", include_in_schema=False)
 @router.get("/note/{title}", include_in_schema=False)
+@router.get("/attachments", include_in_schema=False)
 def root(title: str = ""):
     with open("client/dist/index.html", "r", encoding="utf-8") as f:
         html = f.read()
@@ -197,6 +198,21 @@ def get_config():
 
 
 # region Attachments
+# List Attachments
+@router.get(
+    "/api/attachments",
+    dependencies=auth_deps,
+    response_model=List[AttachmentInfo],
+)
+def get_attachments():
+    """List all attachments along with the notes that reference them."""
+    references = note_storage.get_attachment_references()
+    attachments = attachment_storage.list()
+    for attachment in attachments:
+        attachment.notes = references.get(attachment.filename, [])
+    return attachments
+
+
 # Get Attachment
 @router.get(
     "/api/attachments/{filename}",
@@ -243,6 +259,30 @@ if global_config.auth_type != AuthType.READ_ONLY:
             )
         except FileExistsError:
             raise HTTPException(409, api_messages.attachment_exists)
+
+    # Delete Attachment
+    @router.delete(
+        "/api/attachments/{filename}",
+        dependencies=auth_deps,
+        response_model=None,
+    )
+    def delete_attachment(filename: str):
+        """Delete an attachment. Refuses to delete attachments that are
+        still linked to from a note."""
+        try:
+            references = note_storage.get_attachment_references()
+            if references.get(filename):
+                raise HTTPException(409, api_messages.attachment_in_use)
+            attachment_storage.delete(filename)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=api_messages.invalid_attachment_filename,
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404, detail=api_messages.attachment_not_found
+            )
 
 
 # endregion

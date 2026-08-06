@@ -1,3 +1,4 @@
+import { formatFileSize } from "./helpers.js";
 import router from "./router.js";
 
 class Note {
@@ -42,4 +43,26 @@ class SearchResult extends Note {
   }
 }
 
-export { Note, SearchResult };
+class Attachment {
+  constructor(attachment) {
+    this.filename = attachment?.filename;
+    this.url = attachment?.url;
+    this.size = attachment?.size;
+    this.lastModified = attachment?.lastModified;
+    this.notes = attachment?.notes || [];
+  }
+
+  get lastModifiedAsDate() {
+    return new Date(this.lastModified * 1000);
+  }
+
+  get lastModifiedAsString() {
+    return this.lastModifiedAsDate.toLocaleString();
+  }
+
+  get sizeAsString() {
+    return formatFileSize(this.size);
+  }
+}
+
+export { Attachment, Note, SearchResult };

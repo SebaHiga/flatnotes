@@ -38,6 +38,11 @@ const router = createRouter({
         sortBy: Number(route.query[constants.params.sortBy]) || undefined,
       }),
     },
+    {
+      path: "/attachments",
+      name: "attachments",
+      component: () => import("./views/Attachments.vue"),
+    },
   ],
 });
 
@@ -70,6 +75,8 @@ router.afterEach((to) => {
     } else {
       title = "New Note - " + title;
     }
+  } else if (to.name === "attachments") {
+    title = `Attachments - ${title}`;
   }
   document.title = title;
 });

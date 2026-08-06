@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Dict, List, Literal
 
 from .models import Note, NoteCreate, NoteUpdate, SearchResult
 
@@ -39,4 +39,10 @@ class BaseNotes(ABC):
     @abstractmethod
     def get_tags(self) -> list[str]:
         """Get a list of all indexed tags."""
+        pass
+
+    @abstractmethod
+    def get_attachment_references(self) -> Dict[str, List[str]]:
+        """Return a mapping of attachment filename to the titles of the
+        notes that reference it."""
         pass

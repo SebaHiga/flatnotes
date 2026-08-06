@@ -3,8 +3,9 @@ import os
 import re
 import shutil
 import time
+import urllib.parse
 from datetime import datetime
-from typing import List, Literal, Set, Tuple
+from typing import Dict, List, Literal, Set, Tuple
 
 import whoosh
 from whoosh import writing
@@ -46,6 +47,7 @@ class FileSystemNotes(BaseNotes):
     TAGS_WITH_HASH_RE = re.compile(
         r"(?:(?<=^)|(?<=\s))#[a-zA-Z0-9_-]+(?=\s|$)"
     )
+    ATTACHMENT_REF_RE = re.compile(r"attachments/([^\s)\"']+)")
 
     def __init__(self):
         self.storage_path = get_env("FLATNOTES_PATH", mandatory=True)
@@ -158,6 +160,19 @@ class FileSystemNotes(BaseNotes):
         with self.index.reader() as reader:
             tags = reader.field_terms("tags")
             return [tag for tag in tags]
+
+    def get_attachment_references(self) -> Dict[str, List[str]]:
+        """Return a mapping of attachment filename to the titles of the
+        notes that reference it, derived from attachments/ links in each
+        note's content."""
+        references: Dict[str, List[str]] = {}
+        for filename in self._list_all_note_filenames():
+            title = self._strip_ext(filename)
+            content = self._read_file(self._path_from_title(title))
+            for match in self.ATTACHMENT_REF_RE.finditer(content):
+                attachment_filename = urllib.parse.unquote(match.group(1))
+                references.setdefault(attachment_filename, []).append(title)
+        return references
 
     @property
     def _index_path(self):
