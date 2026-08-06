@@ -15,6 +15,8 @@ class GlobalConfig:
         self.quick_access_sort: str = self._quick_access_sort()
         self.quick_access_limit: int = self._quick_access_limit()
         self.path_prefix: str = self._load_path_prefix()
+        self.ollama_host: str = self._ollama_host()
+        self.ollama_model: str = self._ollama_model()
 
     def load_auth(self):
         if self.auth_type in (AuthType.NONE, AuthType.READ_ONLY):
@@ -95,6 +97,18 @@ class GlobalConfig:
         key = "FLATNOTES_QUICK_ACCESS_LIMIT"
         return get_env(key, mandatory=False, default=4, cast_int=True)
 
+    def _ollama_host(self):
+        key = "FLATNOTES_OLLAMA_HOST"
+        return get_env(key, mandatory=False, default="http://localhost:11434")
+
+    def _ollama_model(self):
+        key = "FLATNOTES_OLLAMA_MODEL"
+        return get_env(key, mandatory=False, default=None)
+
+    @property
+    def ollama_enabled(self) -> bool:
+        return bool(self.ollama_model)
+
     def _load_path_prefix(self):
         key = "FLATNOTES_PATH_PREFIX"
         value = get_env(key, mandatory=False, default="")
@@ -121,3 +135,4 @@ class GlobalConfigResponseModel(CustomBaseModel):
     quick_access_term: str
     quick_access_sort: str
     quick_access_limit: int
+    ollama_enabled: bool

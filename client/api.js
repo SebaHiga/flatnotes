@@ -201,6 +201,53 @@ export async function deleteAttachment(filename) {
   }
 }
 
+export async function streamChat(question, noteTitle, onEvent) {
+  // Uses raw fetch rather than the axios instance above because axios
+  // (1.19.0) doesn't expose a readable stream for the response body.
+  const url = new URL("api/chat", document.baseURI);
+  const headers = { "Content-Type": "application/json" };
+  const token = getStoredToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(url, {
+    method: "POST",
+    headers: headers,
+    body: JSON.stringify({ question: question, noteTitle: noteTitle }),
+  });
+  if (!response.ok) {
+    let detail;
+    try {
+      detail = (await response.json()).detail;
+    } catch {
+      detail = null;
+    }
+    const error = new Error(detail || "Failed to reach the server.");
+    error.response = response;
+    throw error;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (line.trim()) {
+        onEvent(JSON.parse(line));
+      }
+    }
+  }
+  if (buffer.trim()) {
+    onEvent(JSON.parse(buffer));
+  }
+}
+
 export async function createAttachment(file, onProgress) {
   try {
     const formData = new FormData();

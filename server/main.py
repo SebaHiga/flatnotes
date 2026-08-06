@@ -1,10 +1,11 @@
 from typing import List, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import api_messages
+import chat
 from attachments.base import BaseAttachments
 from attachments.models import AttachmentCreateResponse, AttachmentInfo
 from auth.base import BaseAuth
@@ -317,6 +318,35 @@ def get_tags():
 # endregion
 
 
+# region Chat
+@router.post("/api/chat", dependencies=auth_deps)
+def post_chat(data: chat.ChatRequest):
+    """Ask a question about a specific note, answered by a local Ollama
+    model using only that note's content."""
+    if not global_config.ollama_enabled:
+        raise HTTPException(503, api_messages.chat_not_configured)
+    try:
+        note = note_storage.get(data.note_title)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=api_messages.invalid_note_title
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, api_messages.note_not_found)
+    return StreamingResponse(
+        chat.stream_chat_response(
+            global_config.ollama_host,
+            global_config.ollama_model,
+            data.question,
+            note,
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+# endregion
+
+
 # region Config
 @router.get("/api/config", response_model=GlobalConfigResponseModel)
 def get_config():
@@ -328,6 +358,7 @@ def get_config():
         quick_access_term=global_config.quick_access_term,
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
+        ollama_enabled=global_config.ollama_enabled,
     )
 
 

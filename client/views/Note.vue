@@ -91,6 +91,14 @@
           class="ml-1"
           @click="toggleVimModeHandler"
         />
+        <!-- Chat Toggle -->
+        <Toggle
+          v-show="showChatToggle"
+          label="Chat"
+          :isOn="chatPanelOpen"
+          class="ml-1"
+          @click="chatPanelOpen = !chatPanelOpen"
+        />
         <!-- Edit Toggle -->
         <Toggle
           v-if="canModify"
@@ -105,33 +113,43 @@
     <hr v-if="!editMode" class="my-4 border-theme-border" />
 
     <!-- Content -->
-    <div class="flex-1">
-      <ToastViewer
-        v-if="!editMode"
-        :initialValue="note.content"
-        class="toast-viewer pb-4"
-      />
-      <CodeMirrorEditor
-        v-else-if="vimModeEnabled"
-        ref="toastEditor"
-        :initialValue="getInitialEditorValue()"
-        @change="startContentChangedTimeout"
-        @keydown="keydownHandler"
-        @file-drop="fileDropHandler"
-        @save="saveHandler(false)"
-        @save-and-close="saveHandler(true)"
-        @quit="closeHandler"
-      />
-      <ToastEditor
-        v-else
-        ref="toastEditor"
-        :initialValue="getInitialEditorValue()"
-        :initialEditType="loadDefaultEditorMode()"
-        :addImageBlobHook="addImageBlobHook"
-        @change="startContentChangedTimeout"
-        @keydown="keydownHandler"
-        @file-drop="fileDropHandler"
-      />
+    <div class="flex min-h-0 flex-1 gap-4">
+      <div class="min-w-0 flex-1 overflow-y-auto">
+        <ToastViewer
+          v-if="!editMode"
+          :initialValue="note.content"
+          class="toast-viewer pb-4"
+        />
+        <CodeMirrorEditor
+          v-else-if="vimModeEnabled"
+          ref="toastEditor"
+          :initialValue="getInitialEditorValue()"
+          @change="startContentChangedTimeout"
+          @keydown="keydownHandler"
+          @file-drop="fileDropHandler"
+          @save="saveHandler(false)"
+          @save-and-close="saveHandler(true)"
+          @quit="closeHandler"
+        />
+        <ToastEditor
+          v-else
+          ref="toastEditor"
+          :initialValue="getInitialEditorValue()"
+          :initialEditType="loadDefaultEditorMode()"
+          :addImageBlobHook="addImageBlobHook"
+          @change="startContentChangedTimeout"
+          @keydown="keydownHandler"
+          @file-drop="fileDropHandler"
+        />
+      </div>
+
+      <!-- Chat Panel -->
+      <div
+        v-if="chatPanelOpen && showChatToggle"
+        class="w-full shrink-0 border-theme-border pl-4 md:w-96 md:border-l print:hidden"
+      >
+        <ChatPanel :key="note.title" :noteTitle="note.title" />
+      </div>
     </div>
   </LoadingIndicator>
 </template>
@@ -163,6 +181,7 @@ import {
   updateNote,
 } from "../api.js";
 import { Note } from "../classes.js";
+import ChatPanel from "../components/ChatPanel.vue";
 import CodeMirrorEditor from "../components/codemirror/CodeMirrorEditor.vue";
 import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomButton from "../components/CustomButton.vue";
@@ -182,6 +201,10 @@ const props = defineProps({
 const canModify = computed(
   () => globalStore.config.authType != authTypes.readOnly,
 );
+const showChatToggle = computed(
+  () => globalStore.config.ollamaEnabled && !isNewNote.value,
+);
+const chatPanelOpen = ref(false);
 let contentChangedTimeout = null;
 const editMode = ref(false);
 const globalStore = useGlobalStore();

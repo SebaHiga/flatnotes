@@ -14,3 +14,6 @@ attachment_in_use = (
     "Cannot delete attachment. It is still linked to one or more notes."
 )
 history_not_found = "No history is available for the specified version."
+chat_not_configured = (
+    "Chat is not configured. Set FLATNOTES_OLLAMA_MODEL to enable it."
+)
