@@ -13,3 +13,4 @@ invalid_attachment_filename = (
 attachment_in_use = (
     "Cannot delete attachment. It is still linked to one or more notes."
 )
+history_not_found = "No history is available for the specified version."

@@ -25,6 +25,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: "/note/:title/history",
+      name: "note-history",
+      component: () => import("./views/NoteHistory.vue"),
+      props: true,
+    },
+    {
       path: "/new",
       name: "new",
       component: () => import("./views/Note.vue"),
@@ -75,6 +81,8 @@ router.afterEach((to) => {
     } else {
       title = "New Note - " + title;
     }
+  } else if (to.name === "note-history") {
+    title = `History: ${to.params.title} - ${title}`;
   } else if (to.name === "attachments") {
     title = `Attachments - ${title}`;
   }

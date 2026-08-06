@@ -54,11 +54,19 @@
 
       <!-- Buttons -->
       <div class="flex shrink-0 self-end md:self-baseline print:hidden">
+        <!-- History Button -->
+        <CustomButton
+          v-show="!isNewNote"
+          label="History"
+          :iconPath="mdiHistory"
+          @click="historyHandler"
+        />
         <!-- Delete Button -->
         <CustomButton
           v-show="canModify && !isNewNote"
           label="Delete"
           :iconPath="mdilDelete"
+          class="ml-1"
           @click="deleteHandler"
         />
         <!-- Save Button -->
@@ -120,7 +128,7 @@
 </style>
 
 <script setup>
-import { mdiNoteOffOutline } from "@mdi/js";
+import { mdiHistory, mdiNoteOffOutline } from "@mdi/js";
 import { mdilContentSave, mdilDelete } from "@mdi/light-js";
 import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
@@ -232,6 +240,11 @@ function setEditMode() {
 function getInitialEditorValue() {
   const draftContent = loadDraft();
   return draftContent ? draftContent : note.value.content;
+}
+
+// Note History
+function historyHandler() {
+  router.push({ name: "note-history", params: { title: note.value.title } });
 }
 
 // Note Deletion

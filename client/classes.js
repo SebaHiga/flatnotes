@@ -65,4 +65,22 @@ class Attachment {
   }
 }
 
-export { Attachment, Note, SearchResult };
+class HistoryEntry {
+  constructor(entry) {
+    this.commitHash = entry?.commitHash;
+    this.timestamp = entry?.timestamp;
+    this.changeType = entry?.changeType;
+    this.title = entry?.title;
+    this.oldTitle = entry?.oldTitle;
+  }
+
+  get timestampAsDate() {
+    return new Date(this.timestamp * 1000);
+  }
+
+  get timestampAsString() {
+    return this.timestampAsDate.toLocaleString();
+  }
+}
+
+export { Attachment, HistoryEntry, Note, SearchResult };

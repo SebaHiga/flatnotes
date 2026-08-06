@@ -2,6 +2,29 @@ export function isImageFile(file) {
   return file.type.startsWith("image/");
 }
 
+export function parseUnifiedDiff(diffText) {
+  if (!diffText) return [];
+  return diffText
+    .split("\n")
+    .filter(
+      (line) =>
+        !/^(diff --git|index |--- |\+\+\+ |new file|deleted file|similarity index|rename (from|to)|\\ No newline)/.test(
+          line,
+        ),
+    )
+    .map((line) => {
+      if (line.startsWith("@@")) {
+        return { type: "hunk", content: line };
+      } else if (line.startsWith("+")) {
+        return { type: "added", content: line.slice(1) };
+      } else if (line.startsWith("-")) {
+        return { type: "removed", content: line.slice(1) };
+      } else {
+        return { type: "context", content: line.slice(1) };
+      }
+    });
+}
+
 export function formatFileSize(bytes) {
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;

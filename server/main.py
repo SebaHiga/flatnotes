@@ -11,6 +11,9 @@ from auth.base import BaseAuth
 from auth.models import Login, Token
 from global_config import AuthType, GlobalConfig, GlobalConfigResponseModel
 from helpers import replace_base_href
+from history.base import BaseHistory
+from history.models import HistoryDiff, HistoryEntry, HistoryVersion
+from logger import logger
 from notes.base import BaseNotes
 from notes.models import Note, NoteCreate, NoteUpdate, SearchResult
 
@@ -18,6 +21,13 @@ global_config = GlobalConfig()
 auth: BaseAuth = global_config.load_auth()
 note_storage: BaseNotes = global_config.load_note_storage()
 attachment_storage: BaseAttachments = global_config.load_attachment_storage()
+history_storage: BaseHistory = global_config.load_history_storage()
+try:
+    history_storage.reconcile()
+except Exception:
+    logger.warning(
+        "Failed to reconcile note history on startup", exc_info=True
+    )
 auth_deps = [Depends(auth.authenticate)] if auth else []
 router = APIRouter()
 app = FastAPI(
@@ -33,6 +43,7 @@ replace_base_href("client/dist/index.html", global_config.path_prefix)
 @router.get("/search", include_in_schema=False)
 @router.get("/new", include_in_schema=False)
 @router.get("/note/{title}", include_in_schema=False)
+@router.get("/note/{title}/history", include_in_schema=False)
 @router.get("/attachments", include_in_schema=False)
 def root(title: str = ""):
     with open("client/dist/index.html", "r", encoding="utf-8") as f:
@@ -85,6 +96,62 @@ def get_note(title: str):
         raise HTTPException(404, api_messages.note_not_found)
 
 
+# Get Note History
+@router.get(
+    "/api/notes/{title}/history",
+    dependencies=auth_deps,
+    response_model=List[HistoryEntry],
+)
+def get_note_history(title: str):
+    """Get the version history for a specific note, most recent first."""
+    try:
+        history_storage.reconcile()
+    except Exception:
+        logger.warning("Failed to reconcile note history", exc_info=True)
+    try:
+        return history_storage.list_versions(title)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=api_messages.invalid_note_title
+        )
+
+
+# Get Note History Version
+@router.get(
+    "/api/notes/{title}/history/{commit_hash}",
+    dependencies=auth_deps,
+    response_model=HistoryVersion,
+)
+def get_note_history_version(title: str, commit_hash: str):
+    """Get the content of a note as of a specific version."""
+    try:
+        return history_storage.get_version(title, commit_hash)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=api_messages.invalid_note_title
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, api_messages.history_not_found)
+
+
+# Get Note History Diff
+@router.get(
+    "/api/notes/{title}/history/{commit_hash}/diff",
+    dependencies=auth_deps,
+    response_model=HistoryDiff,
+)
+def get_note_history_diff(title: str, commit_hash: str):
+    """Get the diff introduced by a specific version of a note."""
+    try:
+        return history_storage.get_diff(title, commit_hash)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=api_messages.invalid_note_title
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, api_messages.history_not_found)
+
+
 if global_config.auth_type != AuthType.READ_ONLY:
 
     # Create Note
@@ -96,7 +163,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
     def post_note(note: NoteCreate):
         """Create a new note."""
         try:
-            return note_storage.create(note)
+            created = note_storage.create(note)
         except ValueError:
             raise HTTPException(
                 status_code=400,
@@ -106,6 +173,14 @@ if global_config.auth_type != AuthType.READ_ONLY:
             raise HTTPException(
                 status_code=409, detail=api_messages.note_exists
             )
+        try:
+            history_storage.record_create(created)
+        except Exception:
+            logger.warning(
+                f"Failed to record history for '{created.title}'",
+                exc_info=True,
+            )
+        return created
 
     # Update Note
     @router.patch(
@@ -115,7 +190,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
     )
     def patch_note(title: str, data: NoteUpdate):
         try:
-            return note_storage.update(title, data)
+            updated = note_storage.update(title, data)
         except ValueError:
             raise HTTPException(
                 status_code=400,
@@ -127,6 +202,62 @@ if global_config.auth_type != AuthType.READ_ONLY:
             )
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
+        try:
+            history_storage.record_update(
+                updated,
+                old_title=title if updated.title != title else None,
+            )
+        except Exception:
+            logger.warning(
+                f"Failed to record history for '{updated.title}'",
+                exc_info=True,
+            )
+        return updated
+
+    # Restore Note History Version
+    @router.post(
+        "/api/notes/{title}/history/{commit_hash}/restore",
+        dependencies=auth_deps,
+        response_model=Note,
+    )
+    def restore_note_history_version(title: str, commit_hash: str):
+        """Restore a note to a previous version. This creates a new
+        version rather than rewriting history."""
+        try:
+            version = history_storage.get_version(title, commit_hash)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail=api_messages.invalid_note_title
+            )
+        except FileNotFoundError:
+            raise HTTPException(404, api_messages.history_not_found)
+
+        try:
+            restored = note_storage.update(
+                title, NoteUpdate(new_content=version.content)
+            )
+            undeleted = False
+        except FileNotFoundError:
+            # The note is currently deleted; restoring "undeletes" it.
+            restored = note_storage.create(
+                NoteCreate(title=title, content=version.content)
+            )
+            undeleted = True
+
+        try:
+            if undeleted:
+                history_storage.record_create(
+                    restored, restore_source=commit_hash
+                )
+            else:
+                history_storage.record_update(
+                    restored, restore_source=commit_hash
+                )
+        except Exception:
+            logger.warning(
+                f"Failed to record history for '{title}'", exc_info=True
+            )
+        return restored
 
     # Delete Note
     @router.delete(
@@ -144,6 +275,12 @@ if global_config.auth_type != AuthType.READ_ONLY:
             )
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
+        try:
+            history_storage.record_delete(title)
+        except Exception:
+            logger.warning(
+                f"Failed to record history for '{title}'", exc_info=True
+            )
 
 
 # endregion

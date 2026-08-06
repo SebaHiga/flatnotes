@@ -1,6 +1,6 @@
 import * as constants from "./constants.js";
 
-import { Note, SearchResult } from "./classes.js";
+import { HistoryEntry, Note, SearchResult } from "./classes.js";
 
 import axios from "axios";
 import { getStoredToken } from "./tokenStorage.js";
@@ -126,6 +126,50 @@ export async function updateNote(title, newTitle, newContent) {
 export async function deleteNote(title) {
   try {
     await api.delete(`api/notes/${encodeURIComponent(title)}`);
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function getNoteHistory(title) {
+  try {
+    const response = await api.get(
+      `api/notes/${encodeURIComponent(title)}/history`,
+    );
+    return response.data.map((entry) => new HistoryEntry(entry));
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function getNoteHistoryVersion(title, commitHash) {
+  try {
+    const response = await api.get(
+      `api/notes/${encodeURIComponent(title)}/history/${encodeURIComponent(commitHash)}`,
+    );
+    return response.data;
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function getNoteHistoryDiff(title, commitHash) {
+  try {
+    const response = await api.get(
+      `api/notes/${encodeURIComponent(title)}/history/${encodeURIComponent(commitHash)}/diff`,
+    );
+    return response.data;
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function restoreNoteHistoryVersion(title, commitHash) {
+  try {
+    const response = await api.post(
+      `api/notes/${encodeURIComponent(title)}/history/${encodeURIComponent(commitHash)}/restore`,
+    );
+    return new Note(response.data);
   } catch (response) {
     return Promise.reject(response);
   }

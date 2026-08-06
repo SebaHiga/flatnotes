@@ -34,6 +34,11 @@ class GlobalConfig:
 
         return FileSystemAttachments()
 
+    def load_history_storage(self):
+        from history.file_system import FileSystemHistory
+
+        return FileSystemHistory()
+
     def _load_auth_type(self):
         key = "FLATNOTES_AUTH_TYPE"
         auth_type = get_env(

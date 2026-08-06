@@ -41,6 +41,7 @@ RUN mkdir -p ${FLATNOTES_PATH}
 
 RUN apt update && apt install -y \
     curl \
+    git \
     gosu \
     && rm -rf /var/lib/apt/lists/*
 
