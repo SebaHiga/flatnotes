@@ -100,12 +100,34 @@ const messages = ref([]);
 const messageList = ref();
 const sending = ref(false);
 
+// Builds the {role, content} history sent to Ollama so it has memory of
+// earlier turns — without this, every message was answered in total
+// isolation, so follow-ups like "yes, add it" or "put it under Groceries"
+// had nothing to refer back to.
+function buildHistory() {
+  return messages.value
+    .filter((message) => !message.error)
+    .map((message) => {
+      let content = message.content || "";
+      if (message.edit) {
+        const status = !message.edit.resolved
+          ? "not yet applied"
+          : message.edit.applied
+            ? "applied by the user"
+            : "discarded by the user";
+        content += `\n\n[Proposed edit, ${status}, shown to the user as this diff:]\n${message.edit.diff}`;
+      }
+      return { role: message.role, content };
+    });
+}
+
 async function send() {
   const askedQuestion = question.value.trim();
   if (!askedQuestion || sending.value) {
     return;
   }
   question.value = "";
+  const history = buildHistory();
   messages.value.push({ role: "user", content: askedQuestion });
   const assistantMessage = {
     role: "assistant",
@@ -118,7 +140,7 @@ async function send() {
   sending.value = true;
   scrollToBottom();
   try {
-    await streamChat(askedQuestion, props.noteTitle, (event) => {
+    await streamChat(askedQuestion, props.noteTitle, history, (event) => {
       if (event.type === "token") {
         assistantMessage.content += event.content;
       } else if (event.type === "edit") {

@@ -201,7 +201,7 @@ export async function deleteAttachment(filename) {
   }
 }
 
-export async function streamChat(question, noteTitle, onEvent) {
+export async function streamChat(question, noteTitle, history, onEvent) {
   // Uses raw fetch rather than the axios instance above because axios
   // (1.19.0) doesn't expose a readable stream for the response body.
   const url = new URL("api/chat", document.baseURI);
@@ -213,7 +213,11 @@ export async function streamChat(question, noteTitle, onEvent) {
   const response = await fetch(url, {
     method: "POST",
     headers: headers,
-    body: JSON.stringify({ question: question, noteTitle: noteTitle }),
+    body: JSON.stringify({
+      question: question,
+      noteTitle: noteTitle,
+      history: history,
+    }),
   });
   if (!response.ok) {
     let detail;

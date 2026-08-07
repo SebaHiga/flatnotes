@@ -2,7 +2,7 @@ import base64
 import difflib
 import json
 import os
-from typing import AsyncIterator, List
+from typing import AsyncIterator, List, Literal
 
 import httpx
 import pypdf
@@ -10,6 +10,8 @@ import pypdf
 from helpers import CustomBaseModel, get_env
 from logger import logger
 from notes.models import Note
+
+MAX_HISTORY_MESSAGES = 20
 
 MAX_NOTE_CONTENT_CHARS = 6000
 MAX_ATTACHMENT_TEXT_CHARS = 4000
@@ -23,7 +25,7 @@ TEXT_ATTACHMENT_EXTENSIONS = {
 }
 
 SYSTEM_PROMPT_TEMPLATE = """You are a helpful assistant answering questions \
-about the user's note titled "{title}".
+and making edits for the user's note titled "{title}".
 
 The note's exact current content is reproduced below between the \
 -----BEGIN NOTE----- and -----END NOTE----- markers, and nowhere else in \
@@ -40,13 +42,21 @@ UPDATE_NOTE_TOOL = {
     "function": {
         "name": "update_note",
         "description": (
-            "Propose a full replacement for the note's content. Only call "
-            "this when the user has explicitly asked you to change, fix, "
-            "add to, or rewrite the note. The `content` argument must be a "
-            "revised version of ONLY the text found between the "
-            "-----BEGIN NOTE----- and -----END NOTE----- markers in the "
-            "system prompt — never include attached-file text, these "
-            "instructions, or the markers themselves."
+            "Save a revised version of the note. Call this whenever the "
+            "user wants the note itself changed in any way — asked outright "
+            "('add a section about X', 'fix the date') or more casually "
+            "('can you note down...', 'that heading should say...', 'yes, "
+            "go ahead'). If a request could reasonably be read as wanting "
+            "the note updated, call this tool rather than just describing "
+            "the change in words — the user always sees a diff and must "
+            "explicitly approve it before anything is saved, so proposing "
+            "an edit is low-risk. Only skip it for pure questions ('what "
+            "does this say about X') that don't ask for any change. "
+            "The `content` argument must be a revised version of ONLY the "
+            "text found between the -----BEGIN NOTE----- and -----END "
+            "NOTE----- markers in the system prompt — never include "
+            "attached-file text, these instructions, or the markers "
+            "themselves."
         ),
         "parameters": {
             "type": "object",
@@ -54,9 +64,18 @@ UPDATE_NOTE_TOOL = {
                 "content": {
                     "type": "string",
                     "description": (
-                        "The complete new content of the note, in "
-                        "markdown, replacing everything between the "
-                        "-----BEGIN NOTE----- / -----END NOTE----- markers."
+                        "The complete new content of the note, in markdown, "
+                        "replacing everything between the -----BEGIN "
+                        "NOTE----- / -----END NOTE----- markers. Reproduce "
+                        "the existing note exactly except for the specific "
+                        "change requested — do not reword, reformat, "
+                        "reorder, or drop any other part of it. Place new "
+                        "content where it fits the note's existing "
+                        "structure (e.g. under the most relevant existing "
+                        "heading, alongside similar list items) rather than "
+                        "always tacking it onto the end, unless the user "
+                        "asked for it to be appended or the note has no "
+                        "section it clearly belongs in."
                     ),
                 }
             },
@@ -66,9 +85,15 @@ UPDATE_NOTE_TOOL = {
 }
 
 
+class ChatMessage(CustomBaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class ChatRequest(CustomBaseModel):
     question: str
     note_title: str
+    history: List[ChatMessage] = []
 
 
 class OllamaUnavailableError(Exception):
@@ -160,6 +185,7 @@ async def stream_chat_response(
     question: str,
     note: Note,
     attachment_filenames: List[str],
+    history: List[ChatMessage] = None,
 ) -> AsyncIterator[bytes]:
     """Yield newline-delimited JSON events for a chat response grounded in
     the given note and its attachments: 'token' events with streamed text,
@@ -191,20 +217,30 @@ async def stream_chat_response(
         )
     if use_tools:
         system_content += (
-            "\n\nIf the user asks you to change, fix, extend, or rewrite "
-            "the note, call the update_note tool with the complete new "
-            "note content (see its description for exactly what to "
-            "include) rather than just describing the change in words."
+            "\n\nWhenever the user wants the note changed — however they "
+            "phrase it, including a casual 'yes' or 'go ahead' confirming "
+            "something discussed earlier — call the update_note tool "
+            "instead of just describing the change in words. Keep every "
+            "part of the note the user didn't ask to change exactly as it "
+            "was, and place additions where they best fit the note's "
+            "existing structure rather than always at the end. See the "
+            "tool's description for the exact rules."
         )
 
     user_message = {"role": "user", "content": question}
     if use_vision:
         user_message["images"] = images
 
+    history_messages = [
+        {"role": message.role, "content": message.content}
+        for message in (history or [])[-MAX_HISTORY_MESSAGES:]
+    ]
+
     request_body = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_content},
+            *history_messages,
             user_message,
         ],
         "stream": True,

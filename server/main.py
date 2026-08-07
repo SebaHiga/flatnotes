@@ -346,6 +346,7 @@ def post_chat(data: chat.ChatRequest):
             data.question,
             note,
             attachment_filenames,
+            data.history,
         ),
         media_type="application/x-ndjson",
     )
