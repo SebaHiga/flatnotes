@@ -4,10 +4,12 @@
 
 <script setup>
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 
+import { themeChangeEvent } from "../../constants.js";
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
+import { renderMermaidDiagrams, rerenderMermaidDiagrams } from "./mermaid.js";
 
 const props = defineProps({
   initialValue: String,
@@ -15,13 +17,25 @@ const props = defineProps({
 
 const viewerElement = ref();
 
+function rerenderMermaidHandler() {
+  rerenderMermaidDiagrams(viewerElement.value);
+}
+
 onMounted(() => {
   new Viewer({
     ...baseOptions,
     extendedAutolinks,
     el: viewerElement.value,
     initialValue: props.initialValue,
+    events: {
+      load: () => renderMermaidDiagrams(viewerElement.value),
+    },
   });
+  window.addEventListener(themeChangeEvent, rerenderMermaidHandler);
+});
+
+onUnmounted(() => {
+  window.removeEventListener(themeChangeEvent, rerenderMermaidHandler);
 });
 </script>
 

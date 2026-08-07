@@ -1,3 +1,5 @@
+import { themeChangeEvent } from "./constants.js";
+
 export function isImageFile(file) {
   return file.type.startsWith("image/");
 }
@@ -69,11 +71,13 @@ export function getToastOptions(description, title, severity) {
 export function setDarkThemeOn(save = true) {
   document.body.classList.add("dark");
   if (save) localStorage.setItem("darkTheme", "true");
+  window.dispatchEvent(new Event(themeChangeEvent));
 }
 
 export function setDarkThemeOff(save = true) {
   document.body.classList.remove("dark");
   if (save) localStorage.setItem("darkTheme", "false");
+  window.dispatchEvent(new Event(themeChangeEvent));
 }
 
 export function toggleTheme() {

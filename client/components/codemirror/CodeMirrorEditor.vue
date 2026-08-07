@@ -12,6 +12,7 @@ import { minimalSetup } from "codemirror";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
 import { getFilesFromEvent } from "../../helpers.js";
+import { blankSnippets, startBlankSession } from "./blankSnippets.js";
 import { editorExtensions } from "./theme.js";
 import { registerVimInstance, unregisterVimInstance } from "./vimCommands.js";
 
@@ -47,6 +48,7 @@ onMounted(() => {
         markdown({ codeLanguages: languages }),
         EditorView.lineWrapping,
         ...editorExtensions,
+        ...blankSnippets,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             emit("change");
@@ -126,11 +128,19 @@ function insertNewline() {
   insertAtCursor("\n");
 }
 
+// blanks: [{ start, end }, ...] character offsets into the doc as it stands
+// right after insertion (CodeMirror positions are plain character offsets,
+// so these can be used directly with no conversion).
+function selectBlanks(blanks) {
+  startBlankSession(view, blanks);
+}
+
 defineExpose({
   getMarkdown,
   isWysiwygMode,
   insertAttachmentLink,
   insertAttachmentImage,
   insertNewline,
+  selectBlanks,
 });
 </script>

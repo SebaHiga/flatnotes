@@ -5,12 +5,14 @@
   >
     <PrimeToast />
     <SearchModal v-model="isSearchModalVisible" />
+    <TemplatePickerModal v-model="isTemplatePickerVisible" />
     <NavBar
       v-if="showNavBar"
       ref="navBar"
       :class="{ 'print:hidden': route.name == 'note' }"
       :hide-logo="!showNavBarLogo"
       @toggleSearchModal="toggleSearchModal"
+      @toggleTemplatePicker="toggleTemplatePicker"
     />
     <RouterView />
   </LoadingIndicator>
@@ -29,11 +31,13 @@ import { useGlobalStore } from "./globalStore.js";
 import { loadTheme } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
 import SearchModal from "./partials/SearchModal.vue";
+import TemplatePickerModal from "./partials/TemplatePickerModal.vue";
 import LoadingIndicator from "./components/LoadingIndicator.vue";
 import router from "./router.js";
 
 const globalStore = useGlobalStore();
 const isSearchModalVisible = ref(false);
+const isTemplatePickerVisible = ref(false);
 const loadingIndicator = ref();
 const navBar = ref();
 const route = useRoute();
@@ -83,6 +87,10 @@ const showNavBarLogo = computed(() => {
 
 function toggleSearchModal() {
   isSearchModalVisible.value = !isSearchModalVisible.value;
+}
+
+function toggleTemplatePicker() {
+  isTemplatePickerVisible.value = !isTemplatePickerVisible.value;
 }
 
 loadTheme();

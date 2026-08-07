@@ -20,3 +20,11 @@ export const authTypes = {
 };
 
 export const attachmentUrlPrefix = "attachments/";
+
+// Dispatched on `window` whenever the dark/light theme changes, so
+// already-rendered content (e.g. mermaid diagrams) can redraw to match.
+export const themeChangeEvent = "flatnotes-theme-change";
+
+// Characters not allowed in a note/attachment title since they're stored as
+// {title}.md files on disk (mirrors server/helpers.py's filename validation).
+export const reservedFilenameCharacters = /[<>:"/\\|?*]/;

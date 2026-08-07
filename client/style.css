@@ -56,4 +56,13 @@
         --theme-shadow: none;
         --theme-border: 94 107 128;
     }
+
+    /* iOS Safari zooms the viewport on focus if a form field's font-size is
+       below 16px. Force 16px explicitly rather than relying on inherited
+       defaults so this can't regress. */
+    input,
+    textarea,
+    select {
+        font-size: 16px;
+    }
 }

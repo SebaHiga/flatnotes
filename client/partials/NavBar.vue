@@ -5,9 +5,20 @@
     </RouterLink>
     <div class="flex grow items-start justify-end">
       <!-- New Note -->
-      <RouterLink v-if="showNewButton" :to="{ name: 'new' }">
-        <CustomButton :iconPath="mdilPlusCircle" label="New Note" />
-      </RouterLink>
+      <div v-if="showNewButton" class="flex">
+        <RouterLink :to="{ name: 'new' }">
+          <CustomButton
+            :iconPath="mdilPlusCircle"
+            label="New Note"
+            class="rounded-r-none"
+          />
+        </RouterLink>
+        <CustomButton
+          :iconPath="mdilChevronDown"
+          class="rounded-l-none border-l border-theme-border"
+          @click="emit('toggleTemplatePicker')"
+        />
+      </div>
       <!-- Menu -->
       <CustomButton
         class="ml-1"
@@ -22,6 +33,7 @@
 
 <script setup>
 import {
+  mdilChevronDown,
   mdilLogout,
   mdilMagnify,
   mdilMenu,
@@ -49,7 +61,7 @@ defineProps({
   hideLogo: Boolean,
 });
 
-const emit = defineEmits(["toggleSearchModal"]);
+const emit = defineEmits(["toggleSearchModal", "toggleTemplatePicker"]);
 
 const menuItems = [
   {

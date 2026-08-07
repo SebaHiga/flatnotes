@@ -210,7 +210,7 @@ import LoadingIndicator from "../components/LoadingIndicator.vue";
 import Toggle from "../components/Toggle.vue";
 import ToastEditor from "../components/toastui/ToastEditor.vue";
 import ToastViewer from "../components/toastui/ToastViewer.vue";
-import { authTypes } from "../constants.js";
+import { authTypes, reservedFilenameCharacters } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { formatFileSize, getToastOptions, isImageFile } from "../helpers.js";
 import { isCurrentTokenStored } from "../tokenStorage.js";
@@ -236,7 +236,6 @@ const isNewNote = computed(() => !props.title);
 const loadingIndicator = ref();
 const note = ref({});
 const fileInput = ref();
-const reservedFilenameCharacters = /[<>:"/\\|?*]/;
 const router = useRouter();
 const newTitle = ref();
 const toast = useToast();
@@ -267,8 +266,21 @@ function init() {
         }
       });
   } else {
-    newTitle.value = "";
-    note.value = new Note();
+    // Consume any template picked from TemplatePickerModal.vue (see
+    // globalStore.js) — its substituted content becomes this new note's
+    // starting content, same as note.value.content already does for a
+    // normal blank note. Its resolved title (from a "#title: ..." directive
+    // in the template, if any) pre-fills the title field the same way;
+    // templates without that directive resolve to "", same as today.
+    const template = globalStore.pendingTemplate;
+    globalStore.pendingTemplate = null;
+    // setEditMode() (called via editHandler() below) sets newTitle.value
+    // from note.value.title, so the template's resolved title has to live
+    // there too or it gets clobbered the moment edit mode is entered.
+    note.value = new Note({
+      content: template?.content,
+      title: template?.title || undefined,
+    });
     // Set the editMode to false to close any existing editors.
     // This ensures the editor is cleanly reinitialised in an empty state.
     // Simple fix for #266 without requiring a full re-work of the logic.
@@ -276,6 +288,12 @@ function init() {
     nextTick(() => {
       editHandler();
       loadingIndicator.value.setLoaded();
+      if (template?.blanks.length) {
+        // One more tick so the editor component (mounted as a result of
+        // editHandler() above) has actually rendered before we reach into
+        // its ref.
+        nextTick(() => toastEditor.value?.selectBlanks(template.blanks));
+      }
     });
   }
 }
@@ -712,5 +730,17 @@ function isContentChanged() {
 }
 
 watch(() => props.title, init);
+// Picking a template while already on the "new" note route doesn't change
+// props.title (it's undefined either way), so the watcher above won't fire
+// — re-init explicitly in that case. init() consumes (nulls out)
+// pendingTemplate synchronously, so this doesn't loop.
+watch(
+  () => globalStore.pendingTemplate,
+  (template) => {
+    if (template && isNewNote.value) {
+      init();
+    }
+  },
+);
 onMounted(init);
 </script>

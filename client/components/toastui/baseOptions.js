@@ -3,6 +3,20 @@ import router from "../../router.js";
 import { attachmentUrlPrefix } from "../../constants.js";
 
 const customHTMLRenderer = {
+  // Render ```mermaid fenced code blocks as diagrams instead of plain code.
+  // The container is left for mermaid.js (see mermaid.js) to fill in with an
+  // SVG after the surrounding HTML has been mounted into the DOM.
+  codeBlock(node, { origin }) {
+    const language = node.info?.trim().split(/\s+/)[0]?.toLowerCase();
+    if (language !== "mermaid") {
+      return origin();
+    }
+    return [
+      { type: "openTag", tagName: "div", classNames: ["mermaid"] },
+      { type: "text", content: node.literal },
+      { type: "closeTag", tagName: "div" },
+    ];
+  },
   // Add id attribute to headings
   heading(node, { entering, getChildrenText, origin }) {
     const original = origin();

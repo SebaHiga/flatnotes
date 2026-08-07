@@ -282,3 +282,14 @@
 .toastui-editor-contents th p {
   color: rgb(var(--theme-text));
 }
+
+// Mermaid diagrams
+.toastui-editor-contents div.mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 1rem 0;
+
+  svg {
+    max-width: 100%;
+  }
+}
