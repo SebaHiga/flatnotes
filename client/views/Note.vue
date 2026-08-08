@@ -350,14 +350,31 @@ function loadVimModeEnabled() {
 // Chat
 async function applyChatEdit(newContent) {
   if (editMode.value) {
+    // The AI's proposed content is based on the last-saved note, so applying
+    // it on top of changes already sitting unsaved in the editor would
+    // silently discard those. With no unsaved changes yet, though, there's
+    // nothing to lose — write straight into the open editor so the user can
+    // keep working and save whenever they're ready, rather than forcing them
+    // out of edit mode just to accept an edit.
+    if (unsavedChanges.value) {
+      toast.add(
+        getToastOptions(
+          "Save or discard your current changes first, then apply the AI edit again.",
+          "Cannot Apply",
+          "error",
+        ),
+      );
+      return false;
+    }
+    toastEditor.value.setMarkdown(newContent);
     toast.add(
       getToastOptions(
-        "Finish or discard your current edits before applying an AI edit.",
-        "Cannot Apply",
-        "error",
+        "Note updated by AI — review and save when ready ✓",
+        "Success",
+        "success",
       ),
     );
-    return false;
+    return true;
   }
   try {
     const data = await updateNote(

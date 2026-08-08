@@ -4,7 +4,7 @@
 
 <script setup>
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 
 import { themeChangeEvent } from "../../constants.js";
 import baseOptions from "./baseOptions.js";
@@ -16,13 +16,14 @@ const props = defineProps({
 });
 
 const viewerElement = ref();
+let viewer;
 
 function rerenderMermaidHandler() {
   rerenderMermaidDiagrams(viewerElement.value);
 }
 
 onMounted(() => {
-  new Viewer({
+  viewer = new Viewer({
     ...baseOptions,
     extendedAutolinks,
     el: viewerElement.value,
@@ -33,6 +34,18 @@ onMounted(() => {
   });
   window.addEventListener(themeChangeEvent, rerenderMermaidHandler);
 });
+
+// initialValue is only used for the first render above — TOAST UI's Viewer
+// doesn't watch it itself. Without this, content changed elsewhere (e.g. an
+// AI edit applied from the chat panel) wouldn't show up here until the
+// component was remounted (e.g. a full page refresh).
+watch(
+  () => props.initialValue,
+  (newValue) => {
+    viewer.setMarkdown(newValue || "");
+    renderMermaidDiagrams(viewerElement.value);
+  },
+);
 
 onUnmounted(() => {
   window.removeEventListener(themeChangeEvent, rerenderMermaidHandler);

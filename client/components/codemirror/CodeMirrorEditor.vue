@@ -112,6 +112,12 @@ function getMarkdown() {
   return view.state.doc.toString();
 }
 
+function setMarkdown(content) {
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: content },
+  });
+}
+
 function isWysiwygMode() {
   return false;
 }
@@ -137,6 +143,7 @@ function selectBlanks(blanks) {
 
 defineExpose({
   getMarkdown,
+  setMarkdown,
   isWysiwygMode,
   insertAttachmentLink,
   insertAttachmentImage,

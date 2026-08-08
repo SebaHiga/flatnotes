@@ -20,9 +20,26 @@
             'text-theme-danger': message.error,
           }"
         >
-          <p v-if="message.content" class="whitespace-pre-wrap">{{
+          <!-- Thinking Indicator -->
+          <div
+            v-if="message.thinking"
+            class="flex items-center gap-1 px-1 py-1.5"
+          >
+            <span
+              class="h-1.5 w-1.5 animate-bounce rounded-full bg-theme-text-muted [animation-delay:-300ms]"
+            ></span>
+            <span
+              class="h-1.5 w-1.5 animate-bounce rounded-full bg-theme-text-muted [animation-delay:-150ms]"
+            ></span>
+            <span
+              class="h-1.5 w-1.5 animate-bounce rounded-full bg-theme-text-muted"
+            ></span>
+          </div>
+          <p v-else-if="!message.thinking" class="whitespace-pre-wrap">{{
             message.content
-          }}<span v-if="message.streaming" class="animate-pulse"
+          }}<span
+            v-if="message.streaming || message.pendingContent"
+            class="animate-pulse"
             >▍</span
           ></p>
 
@@ -78,7 +95,7 @@
 <script setup>
 import { mdiArrowUp } from "@mdi/js";
 import { useToast } from "primevue/usetoast";
-import { nextTick, ref } from "vue";
+import { nextTick, onBeforeUnmount, reactive, ref } from "vue";
 
 import { apiErrorHandler, streamChat } from "../api.js";
 import { useGlobalStore } from "../globalStore.js";
@@ -121,6 +138,41 @@ function buildHistory() {
     });
 }
 
+let revealTimer = null;
+
+function stopReveal() {
+  if (revealTimer) {
+    clearInterval(revealTimer);
+    revealTimer = null;
+  }
+}
+
+// Reveals streamed text a few characters at a time so the reply always
+// reads as "typing" in the UI. This matters even though the server already
+// streams token-by-token, because a fast local model can finish generating
+// a whole reply in well under a second — without pacing it client-side,
+// that arrives as one visual jump instead of a stream.
+function startReveal(message) {
+  if (revealTimer) return;
+  revealTimer = setInterval(() => {
+    if (!message.pendingContent) {
+      if (!message.streaming) {
+        stopReveal();
+      }
+      return;
+    }
+    const chunkSize = Math.max(
+      1,
+      Math.ceil(message.pendingContent.length / 20),
+    );
+    message.content += message.pendingContent.slice(0, chunkSize);
+    message.pendingContent = message.pendingContent.slice(chunkSize);
+    scrollToBottom();
+  }, 20);
+}
+
+onBeforeUnmount(stopReveal);
+
 async function send() {
   const askedQuestion = question.value.trim();
   if (!askedQuestion || sending.value) {
@@ -129,21 +181,31 @@ async function send() {
   question.value = "";
   const history = buildHistory();
   messages.value.push({ role: "user", content: askedQuestion });
-  const assistantMessage = {
+  // Reactive so mutations made from the streamChat callback below (holding
+  // this same closure reference, not one re-fetched from `messages.value`)
+  // actually trigger re-renders — a plain object here would update its
+  // fields in memory just fine, but the DOM wouldn't reflect any of it
+  // until something unrelated happened to force a re-render.
+  const assistantMessage = reactive({
     role: "assistant",
     content: "",
+    pendingContent: "",
     edit: null,
     streaming: true,
+    thinking: true,
     error: false,
-  };
+  });
   messages.value.push(assistantMessage);
   sending.value = true;
   scrollToBottom();
   try {
     await streamChat(askedQuestion, props.noteTitle, history, (event) => {
       if (event.type === "token") {
-        assistantMessage.content += event.content;
+        assistantMessage.thinking = false;
+        assistantMessage.pendingContent += event.content;
+        startReveal(assistantMessage);
       } else if (event.type === "edit") {
+        assistantMessage.thinking = false;
         assistantMessage.edit = {
           content: event.content,
           diff: event.diff,
@@ -152,12 +214,18 @@ async function send() {
           applied: false,
         };
       } else if (event.type === "error") {
+        stopReveal();
+        assistantMessage.thinking = false;
+        assistantMessage.pendingContent = "";
         assistantMessage.error = true;
         assistantMessage.content = event.message;
       }
       scrollToBottom();
     });
   } catch (error) {
+    stopReveal();
+    assistantMessage.thinking = false;
+    assistantMessage.pendingContent = "";
     assistantMessage.error = true;
     if (error.response?.status === 503) {
       assistantMessage.content = error.message;

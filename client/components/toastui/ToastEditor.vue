@@ -138,6 +138,10 @@ function getMarkdown() {
   return toastEditor.getMarkdown();
 }
 
+function setMarkdown(content) {
+  toastEditor.setMarkdown(content);
+}
+
 function isWysiwygMode() {
   return toastEditor.isWysiwygMode();
 }
@@ -202,6 +206,7 @@ function selectBlanks(blanks) {
 
 defineExpose({
   getMarkdown,
+  setMarkdown,
   isWysiwygMode,
   insertAttachmentLink,
   insertAttachmentImage,
