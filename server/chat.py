@@ -37,49 +37,68 @@ doesn't contain the answer, say so honestly rather than guessing.
 {content}
 -----END NOTE-----"""
 
-UPDATE_NOTE_TOOL = {
+EDIT_NOTE_TOOL = {
     "type": "function",
     "function": {
-        "name": "update_note",
+        "name": "edit_note",
         "description": (
-            "Save a revised version of the note. Call this whenever the "
-            "user wants the note itself changed in any way — asked outright "
-            "('add a section about X', 'fix the date') or more casually "
-            "('can you note down...', 'that heading should say...', 'yes, "
-            "go ahead'). If a request could reasonably be read as wanting "
-            "the note updated, call this tool rather than just describing "
-            "the change in words — the user always sees a diff and must "
-            "explicitly approve it before anything is saved, so proposing "
-            "an edit is low-risk. Only skip it for pure questions ('what "
-            "does this say about X') that don't ask for any change. "
-            "The `content` argument must be a revised version of ONLY the "
-            "text found between the -----BEGIN NOTE----- and -----END "
-            "NOTE----- markers in the system prompt — never include "
-            "attached-file text, these instructions, or the markers "
-            "themselves."
+            "Propose a change to the note by giving the exact existing "
+            "text to find and what to replace it with. Never retype or "
+            "regenerate the whole note — only the small snippet that's "
+            "actually changing; everything else is preserved "
+            "automatically. Call this whenever the user wants the note "
+            "changed in any way — asked outright ('add a section about "
+            "X', 'fix the date') or more casually ('can you note down...', "
+            "'that heading should say...', 'yes, go ahead'). If a request "
+            "could reasonably be read as wanting the note updated, call "
+            "this tool rather than just describing the change in words — "
+            "the user always sees a diff and must explicitly approve it "
+            "before anything is saved, so proposing an edit is low-risk. "
+            "Only skip it for pure questions ('what does this say about "
+            "X') that don't ask for any change. To make several separate "
+            "changes, call this tool once per change. To move existing "
+            "content to a different place in the note, use two calls: one "
+            "with `replace` empty to remove it from its old spot, and "
+            "another to insert it at the new spot — a single call can "
+            "only change text in place, not relocate it, so skipping the "
+            "removal call would leave it duplicated."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "content": {
+                "find": {
                     "type": "string",
                     "description": (
-                        "The complete new content of the note, in markdown, "
-                        "replacing everything between the -----BEGIN "
-                        "NOTE----- / -----END NOTE----- markers. Reproduce "
-                        "the existing note exactly except for the specific "
-                        "change requested — do not reword, reformat, "
-                        "reorder, or drop any other part of it. Place new "
-                        "content where it fits the note's existing "
-                        "structure (e.g. under the most relevant existing "
-                        "heading, alongside similar list items) rather than "
-                        "always tacking it onto the end, unless the user "
-                        "asked for it to be appended or the note has no "
-                        "section it clearly belongs in."
+                        "A short snippet — a few words up to a couple of "
+                        "lines — copied EXACTLY, character-for-character, "
+                        "from the note's current content (between "
+                        "-----BEGIN NOTE----- and -----END NOTE----- in "
+                        "the system prompt). It must match the note's text "
+                        "exactly and appear only once — pick something "
+                        "specific enough for that, such as a whole line or "
+                        "list item, rather than a single common word. "
+                        "Everything in the note other than this snippet is "
+                        "left completely untouched. To add something new "
+                        "at the very end of the note without changing any "
+                        "existing text, set this to an empty string "
+                        "instead."
                     ),
-                }
+                },
+                "replace": {
+                    "type": "string",
+                    "description": (
+                        "The text that replaces `find`. To insert "
+                        "something next to existing text rather than "
+                        "delete it, repeat that text here plus the "
+                        "addition — e.g. set `find` to one list item and "
+                        "`replace` to that same item followed by a new "
+                        "line for the new item, so the original is kept. "
+                        "If `find` was empty, this is appended as a new "
+                        "paragraph at the end of the note instead."
+                    ),
+                },
             },
-            "required": ["content"],
+            "required": ["find", "replace"],
         },
     },
 }
@@ -154,6 +173,34 @@ def _load_attachments(filenames: List[str]):
     return images, "\n\n".join(text_parts)
 
 
+def _unescape_stray_newlines(text: str) -> str:
+    """Small models occasionally emit a literal backslash-n (two chars)
+    instead of an actual line break inside tool-call string arguments —
+    likely a JSON-escaping artifact, since Ollama hands back arguments
+    already parsed into a dict, so any '\\n' surviving that parse was
+    written by the model as a literal two-character sequence rather than
+    a real newline. Markdown notes essentially never contain a genuine
+    literal backslash-n, so unescaping it is safe."""
+    return text.replace("\\n", "\n").replace("\\t", "\t")
+
+
+def _apply_edit(content: str, find: str, replace: str):
+    """Applies a single find/replace edit to note content. Returns
+    (new_content, None) on success, or (None, error_message) if `find`
+    doesn't match exactly one place in `content`. An empty `find` means
+    "append at the end" rather than a failed match, since asking a small
+    model to precisely re-quote the note's trailing text is unreliable."""
+    if find == "":
+        base = content.rstrip("\n")
+        return (base + "\n\n" + replace if base else replace), None
+    count = content.count(find)
+    if count == 0:
+        return None, "text not found in note"
+    if count > 1:
+        return None, "text is not unique in note"
+    return content.replace(find, replace, 1), None
+
+
 def _unified_diff(old_content: str, new_content: str) -> str:
     diff_lines = difflib.unified_diff(
         (old_content or "").splitlines(),
@@ -219,12 +266,15 @@ async def stream_chat_response(
         system_content += (
             "\n\nWhenever the user wants the note changed — however they "
             "phrase it, including a casual 'yes' or 'go ahead' confirming "
-            "something discussed earlier — call the update_note tool "
-            "instead of just describing the change in words. Keep every "
-            "part of the note the user didn't ask to change exactly as it "
-            "was, and place additions where they best fit the note's "
-            "existing structure rather than always at the end. See the "
-            "tool's description for the exact rules."
+            "something discussed earlier — call the edit_note tool "
+            "instead of just describing the change in words. Never "
+            "rewrite the note from scratch: edit_note only takes a small "
+            "'find' snippet and its 'replace' text, so everything else in "
+            "the note is preserved automatically. Place additions where "
+            "they best fit the note's existing structure (e.g. next to a "
+            "similar list item, under the most relevant heading) rather "
+            "than always at the end, unless the user asked for it to be "
+            "appended. See the tool's description for the exact rules."
         )
 
     user_message = {"role": "user", "content": question}
@@ -246,7 +296,14 @@ async def stream_chat_response(
         "stream": True,
     }
     if use_tools:
-        request_body["tools"] = [UPDATE_NOTE_TOOL]
+        request_body["tools"] = [EDIT_NOTE_TOOL]
+
+    # Edits are applied as find/replace snippets against the note's real,
+    # untruncated content (not the possibly-truncated `note_content` shown
+    # in the prompt) and accumulated across every edit_note call in this
+    # response, so several proposed changes compose into one final diff.
+    current_content = note.content or ""
+    had_edit = False
 
     try:
         async with httpx.AsyncClient(timeout=180) as client:
@@ -271,7 +328,7 @@ async def stream_chat_response(
                         yield _event("token", content=token_content)
                     for tool_call in message.get("tool_calls") or []:
                         function = tool_call.get("function", {})
-                        if function.get("name") != "update_note":
+                        if function.get("name") != "edit_note":
                             continue
                         arguments = function.get("arguments")
                         if isinstance(arguments, str):
@@ -279,13 +336,33 @@ async def stream_chat_response(
                                 arguments = json.loads(arguments)
                             except ValueError:
                                 arguments = {}
-                        new_content = (arguments or {}).get("content")
-                        if isinstance(new_content, str):
-                            yield _event(
-                                "edit",
-                                content=new_content,
-                                diff=_unified_diff(note.content, new_content),
+                        find = (arguments or {}).get("find")
+                        replace = (arguments or {}).get("replace")
+                        if not isinstance(find, str) or not isinstance(
+                            replace, str
+                        ):
+                            continue
+                        find = _unescape_stray_newlines(find)
+                        replace = _unescape_stray_newlines(replace)
+                        new_content, error = _apply_edit(
+                            current_content, find, replace
+                        )
+                        if error:
+                            logger.warning(
+                                f"Model proposed an unapplicable edit "
+                                f"({error}): find={find!r}"
                             )
+                            yield _event(
+                                "edit_error",
+                                message=(
+                                    "The AI tried to change part of the "
+                                    "note it couldn't precisely locate, so "
+                                    "that change was skipped."
+                                ),
+                            )
+                            continue
+                        current_content = new_content
+                        had_edit = True
                     if chunk.get("done"):
                         break
     except (httpx.HTTPError, OllamaUnavailableError):
@@ -298,5 +375,12 @@ async def stream_chat_response(
             ),
         )
         return
+
+    if had_edit:
+        yield _event(
+            "edit",
+            content=current_content,
+            diff=_unified_diff(note.content, current_content),
+        )
 
     yield _event("done")

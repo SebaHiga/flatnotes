@@ -67,6 +67,12 @@
               {{ message.edit.applied ? "Applied ✓" : "Discarded" }}
             </p>
           </div>
+          <p
+            v-if="message.editError"
+            class="mt-2 text-xs text-theme-text-muted"
+          >
+            {{ message.editError }}
+          </p>
         </div>
       </div>
     </div>
@@ -191,6 +197,7 @@ async function send() {
     content: "",
     pendingContent: "",
     edit: null,
+    editError: null,
     streaming: true,
     thinking: true,
     error: false,
@@ -213,6 +220,9 @@ async function send() {
           resolved: false,
           applied: false,
         };
+      } else if (event.type === "edit_error") {
+        assistantMessage.thinking = false;
+        assistantMessage.editError = event.message;
       } else if (event.type === "error") {
         stopReveal();
         assistantMessage.thinking = false;
