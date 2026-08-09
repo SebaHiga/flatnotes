@@ -6,7 +6,7 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, scrollPastEnd } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
 import { minimalSetup } from "codemirror";
 import { onBeforeUnmount, onMounted, ref } from "vue";
@@ -47,6 +47,10 @@ onMounted(() => {
         minimalSetup,
         markdown({ codeLanguages: languages }),
         EditorView.lineWrapping,
+        // Lets the document scroll past its last line (and lets vim's `zz`
+        // actually center a cursor near the end, which otherwise has no
+        // room below it to scroll into).
+        scrollPastEnd(),
         ...editorExtensions,
         ...blankSnippets,
         EditorView.updateListener.of((update) => {

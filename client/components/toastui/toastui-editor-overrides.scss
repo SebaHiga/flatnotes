@@ -1,7 +1,15 @@
+// The bottom value here (rather than a separate lower-specificity rule)
+// is what lets the document scroll past its last line so it isn't pinned
+// to the bottom of the viewport, mirroring the CodeMirror editor's
+// scrollPastEnd() (see CodeMirrorEditor.vue). It has to live in this rule
+// because `.toastui-editor-defaultUI .ProseMirror` below is part of this
+// same selector group, so it matches with that higher specificity — a
+// standalone `.ProseMirror { padding-bottom: ... }` rule elsewhere would
+// always lose to it regardless of source order.
 .ProseMirror,
 .toastui-editor-defaultUI .ProseMirror,
 .toastui-editor-md-container .toastui-editor-md-preview {
-  padding: 1rem 0 0 0;
+  padding: 1rem 0 50vh 0;
 }
 
 .ProseMirror {
