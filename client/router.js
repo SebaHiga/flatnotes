@@ -42,6 +42,11 @@ const router = createRouter({
       props: (route) => ({
         searchTerm: route.query[constants.params.searchTerm],
         sortBy: Number(route.query[constants.params.sortBy]) || undefined,
+        // Fuzzy search and content scope are both on by default (title
+        // matches already outrank content-only matches, so there's no
+        // downside); only an explicit "0" turns either off.
+        fuzzy: route.query[constants.params.fuzzy] !== "0",
+        searchContent: route.query[constants.params.searchContent] !== "0",
       }),
     },
     {

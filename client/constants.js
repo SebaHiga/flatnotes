@@ -4,6 +4,8 @@ export const params = {
   redirect: "redirect",
   showHighlights: "showHighlights",
   sortBy: "sortBy",
+  fuzzy: "fuzzy",
+  searchContent: "content",
 };
 
 export const searchSortOptions = {

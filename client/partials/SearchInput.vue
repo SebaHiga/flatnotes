@@ -46,8 +46,8 @@
 <script setup>
 import { mdilMagnify } from "@mdi/light-js";
 import { useToast } from "primevue/usetoast";
-import { ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { onBeforeUnmount, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import { apiErrorHandler, getTags } from "../api.js";
 import IconLabel from "../components/IconLabel.vue";
@@ -61,7 +61,10 @@ const props = defineProps({
 });
 const emit = defineEmits(["search"]);
 
+const LIVE_SEARCH_DEBOUNCE_MS = 300;
+
 const input = ref();
+const route = useRoute();
 const router = useRouter();
 const searchTerm = ref(props.initialSearchTerm);
 const toast = useToast();
@@ -70,6 +73,7 @@ const tagMatches = ref([]);
 const tagMenuItems = ref([]);
 const tagMenuIndex = ref(0);
 const tagMenuVisible = ref(false);
+let liveSearchTimer = null;
 
 function keydownHandler(event) {
   // Tag Menu Open
@@ -105,17 +109,39 @@ function tagChosen(tag) {
   tagMenuVisible.value = false;
 }
 
+function pushSearch() {
+  // Preserve any other search query params (sort, fuzzy, content scope,
+  // etc.) already present on the current route so live/repeated searches
+  // don't reset them back to their defaults.
+  router.push({
+    name: "search",
+    query: {
+      ...route.query,
+      [constants.params.searchTerm]: searchTerm.value,
+    },
+  });
+}
+
 function search() {
+  clearTimeout(liveSearchTimer);
   if (searchTerm.value) {
-    router.push({
-      name: "search",
-      query: { [constants.params.searchTerm]: searchTerm.value },
-    });
+    pushSearch();
     emit("search");
   } else {
     toast.add(getToastOptions("Please enter a search term.", "Error", "error"));
   }
 }
+
+// Search automatically as the user types, without requiring Enter.
+watch(searchTerm, () => {
+  clearTimeout(liveSearchTimer);
+  if (tagMenuVisible.value || !searchTerm.value) {
+    return;
+  }
+  liveSearchTimer = setTimeout(pushSearch, LIVE_SEARCH_DEBOUNCE_MS);
+});
+
+onBeforeUnmount(() => clearTimeout(liveSearchTimer));
 
 function stateChangeHandler() {
   const wordOnCursor = getWordOnCursor();

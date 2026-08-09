@@ -298,11 +298,20 @@ def search(
     sort: Literal["score", "title", "lastModified"] = "score",
     order: Literal["asc", "desc"] = "desc",
     limit: int = None,
+    fuzzy: bool = False,
+    content: bool = False,
 ):
     """Perform a full text search on all notes."""
     if sort == "lastModified":
         sort = "last_modified"
-    return note_storage.search(term, sort=sort, order=order, limit=limit)
+    return note_storage.search(
+        term,
+        sort=sort,
+        order=order,
+        limit=limit,
+        fuzzy=fuzzy,
+        include_content=content,
+    )
 
 
 @router.get(

@@ -32,6 +32,8 @@ class BaseNotes(ABC):
         sort: Literal["score", "title", "last_modified"] = "score",
         order: Literal["asc", "desc"] = "desc",
         limit: int = None,
+        fuzzy: bool = False,
+        include_content: bool = False,
     ) -> list[SearchResult]:
         """Search for notes."""
         pass

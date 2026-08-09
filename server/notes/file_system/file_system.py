@@ -22,11 +22,15 @@ from whoosh.support.charset import accent_map
 from helpers import get_env, is_valid_filename
 from logger import logger
 
+from .. import fuzzy
 from ..base import BaseNotes
 from ..models import Note, NoteCreate, NoteUpdate, SearchResult
 
 MARKDOWN_EXT = ".md"
 INDEX_SCHEMA_VERSION = "5"
+# Cap on how much of a note's content is scored during fuzzy search, to
+# bound the cost of the subsequence DP for very large notes.
+MAX_FUZZY_CONTENT_CHARS = 20000
 
 StemmingFoldingAnalyzer = StemmingAnalyzer() | CharsetFilter(accent_map)
 
@@ -115,9 +119,19 @@ class FileSystemNotes(BaseNotes):
         sort: Literal["score", "title", "last_modified"] = "score",
         order: Literal["asc", "desc"] = "desc",
         limit: int = None,
+        fuzzy: bool = False,
+        include_content: bool = False,
     ) -> Tuple[SearchResult, ...]:
         """Search the index for the given term."""
         self._sync_index_with_retry()
+        if fuzzy:
+            return self._fuzzy_search(
+                term,
+                include_content=include_content,
+                sort=sort,
+                order=order,
+                limit=limit,
+            )
         term = self._pre_process_search_term(term)
         with self.index.searcher() as searcher:
             # Parse Query
@@ -152,6 +166,76 @@ class FileSystemNotes(BaseNotes):
                 terms=True,
             )
             return tuple(self._search_result_from_hit(hit) for hit in results)
+
+    def _fuzzy_search(
+        self,
+        term: str,
+        include_content: bool,
+        sort: Literal["score", "title", "last_modified"],
+        order: Literal["asc", "desc"],
+        limit: int,
+    ) -> Tuple[SearchResult, ...]:
+        """Search using fzf-style fuzzy subsequence matching (see
+        ../fuzzy.py) instead of Whoosh's query parser. A note matches if its
+        title, or (when include_content is set) its content, matches `term`
+        as a fuzzy subsequence."""
+        results: List[SearchResult] = []
+        with self.index.searcher() as searcher:
+            for stored in searcher.all_stored_fields():
+                title = self._strip_ext(stored["filename"])
+
+                title_match = fuzzy.fuzzy_score(term, title)
+
+                content_ex_tags = None
+                content_match = None
+                if include_content:
+                    content = self._read_file(self._path_from_title(title))
+                    content_ex_tags, _ = self._extract_tags(content)
+                    content_ex_tags = content_ex_tags[:MAX_FUZZY_CONTENT_CHARS]
+                    content_match = fuzzy.fuzzy_score(term, content_ex_tags)
+
+                if title_match is None and content_match is None:
+                    continue
+
+                score = 0.0
+                title_highlights = None
+                content_highlights = None
+                if title_match is not None:
+                    title_score, title_indices = title_match
+                    # Mirrors IndexSchema's title field_boost=2.0.
+                    score += title_score * 2
+                    title_highlights = fuzzy.highlight(title, title_indices)
+                if content_match is not None:
+                    content_score, content_indices = content_match
+                    score += content_score
+                    content_highlights = fuzzy.content_snippet(
+                        content_ex_tags, content_indices
+                    )
+
+                results.append(
+                    SearchResult(
+                        title=title,
+                        last_modified=stored["last_modified"].timestamp(),
+                        score=score,
+                        title_highlights=title_highlights,
+                        content_highlights=content_highlights,
+                        tag_matches=None,
+                    )
+                )
+
+        reverse = order == "desc"
+        if sort == "title":
+            results.sort(key=lambda result: result.title, reverse=reverse)
+        elif sort == "last_modified":
+            results.sort(
+                key=lambda result: result.last_modified, reverse=reverse
+            )
+        else:
+            results.sort(key=lambda result: result.score, reverse=reverse)
+
+        if limit is not None:
+            results = results[:limit]
+        return tuple(results)
 
     def get_tags(self) -> list[str]:
         """Return a list of all indexed tags. Note: Tags no longer in use will

@@ -74,7 +74,7 @@ export async function authCheck() {
   }
 }
 
-export async function getNotes(term, sort, order, limit) {
+export async function getNotes(term, sort, order, limit, fuzzy, searchContent) {
   try {
     const response = await api.get("api/search", {
       params: {
@@ -82,6 +82,8 @@ export async function getNotes(term, sort, order, limit) {
         sort: sort,
         order: order,
         limit: limit,
+        fuzzy: fuzzy,
+        content: searchContent,
       },
     });
     return response.data.map((note) => new SearchResult(note));

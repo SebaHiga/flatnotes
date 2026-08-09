@@ -3,18 +3,36 @@
     <!-- Search Input -->
     <SearchInput :initialSearchTerm="props.searchTerm" class="mb-2" />
 
-    <LoadingIndicator ref="loadingIndicator" class="flex-1">
-      <!-- Sort By -->
-      <div class="flex justify-end">
-        <CustomButton
-          :label="`Sort By: ${sortByName}`"
-          :iconPath="mdiSort"
-          class="mb-1"
-          @click="toggleSortMenu"
+    <!-- Sort By / Fuzzy: always visible, independent of load/result state -->
+    <div class="flex justify-end gap-1">
+      <!-- Search Content Toggle -->
+      <div
+        :class="{ 'pointer-events-none opacity-40': !props.fuzzy }"
+        class="mb-1"
+      >
+        <Toggle
+          label="Search Content"
+          :isOn="props.searchContent"
+          @click="toggleSearchContent"
         />
-        <PrimeMenu ref="sortMenu" :model="menuItems" :popup="true" />
       </div>
+      <!-- Fuzzy Toggle -->
+      <Toggle
+        label="Fuzzy"
+        :isOn="props.fuzzy"
+        class="mb-1"
+        @click="toggleFuzzy"
+      />
+      <CustomButton
+        :label="`Sort By: ${sortByName}`"
+        :iconPath="mdiSort"
+        class="mb-1"
+        @click="toggleSortMenu"
+      />
+      <PrimeMenu ref="sortMenu" :model="menuItems" :popup="true" />
+    </div>
 
+    <LoadingIndicator ref="loadingIndicator" class="flex-1">
       <!-- Search Results -->
       <div
         v-for="result in results"
@@ -54,6 +72,7 @@ import CustomButton from "../components/CustomButton.vue";
 import LoadingIndicator from "../components/LoadingIndicator.vue";
 import PrimeMenu from "../components/PrimeMenu.vue";
 import Tag from "../components/Tag.vue";
+import Toggle from "../components/Toggle.vue";
 import { params, searchSortOptions } from "../constants.js";
 import SearchInput from "../partials/SearchInput.vue";
 
@@ -63,6 +82,8 @@ const props = defineProps({
     type: Number,
     default: searchSortOptions.score,
   },
+  fuzzy: Boolean,
+  searchContent: Boolean,
 });
 
 const loadingIndicator = ref();
@@ -82,7 +103,14 @@ const sortByName = computed(() => {
 
 function init() {
   loadingIndicator.value.setLoading();
-  getNotes(props.searchTerm)
+  getNotes(
+    props.searchTerm,
+    undefined,
+    undefined,
+    undefined,
+    props.fuzzy,
+    props.searchContent,
+  )
     .then((data) => {
       results.value = sortResults(data);
       if (results.value.length > 0) {
@@ -111,13 +139,35 @@ function reSortResults() {
   results.value = sortResults(results.value);
 }
 
-function updateSortByParam(sortBy) {
+function pushSearchQuery(overrides) {
   router.push({
     name: "search",
     query: {
       [params.searchTerm]: props.searchTerm,
-      [params.sortBy]: sortBy,
+      [params.sortBy]: props.sortBy,
+      // Fuzzy and content scope both default to on, so their state must
+      // always be written explicitly ("0"/"1") rather than omitted.
+      [params.fuzzy]: props.fuzzy ? "1" : "0",
+      [params.searchContent]: props.searchContent ? "1" : "0",
+      ...overrides,
     },
+  });
+}
+
+function updateSortByParam(sortBy) {
+  pushSearchQuery({ [params.sortBy]: sortBy });
+}
+
+function toggleFuzzy() {
+  pushSearchQuery({ [params.fuzzy]: props.fuzzy ? "0" : "1" });
+}
+
+function toggleSearchContent() {
+  if (!props.fuzzy) {
+    return;
+  }
+  pushSearchQuery({
+    [params.searchContent]: props.searchContent ? "0" : "1",
   });
 }
 
@@ -147,7 +197,7 @@ function toggleSortMenu(event) {
   sortMenu.value.toggle(event);
 }
 
-watch(() => props.searchTerm, init);
+watch(() => [props.searchTerm, props.fuzzy, props.searchContent], init);
 watch(() => props.sortBy, reSortResults);
 onMounted(init);
 </script>
