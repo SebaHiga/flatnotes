@@ -1,5 +1,16 @@
 <template>
   <div class="flex h-full flex-col">
+    <div v-if="models.length > 1" class="mb-2 flex items-center gap-1">
+      <select
+        v-model="selectedModel"
+        class="w-full truncate rounded border border-theme-border bg-theme-background px-1 py-0.5 text-xs text-theme-text-muted focus:outline-none dark:bg-theme-background-elevated"
+      >
+        <option v-for="model in models" :key="model.id" :value="model.id">
+          {{ model.id }}{{ model.loaded ? "" : " (cold start)"
+          }}{{ model.vision ? "" : " — no images" }}
+        </option>
+      </select>
+    </div>
     <div ref="messageList" class="mb-2 flex-1 overflow-y-auto">
       <p
         v-if="messages.length === 0"
@@ -20,9 +31,35 @@
             'text-theme-danger': message.error,
           }"
         >
+          <!-- Reasoning -->
+          <div v-if="message.reasoning" class="mb-1 max-w-full">
+            <button
+              type="button"
+              class="flex max-w-full items-center gap-1 text-left text-xs text-theme-text-muted"
+              @click="message.reasoningExpanded = !message.reasoningExpanded"
+            >
+              <SvgIcon
+                type="mdi"
+                :path="mdiChevronRight"
+                :size="14"
+                class="shrink-0 transition-transform"
+                :class="{ 'rotate-90': message.reasoningExpanded }"
+              ></SvgIcon>
+              <span class="min-w-0 flex-1 truncate italic">{{
+                message.reasoningExpanded
+                  ? "Thinking"
+                  : lastReasoningLine(message)
+              }}</span>
+            </button>
+            <p
+              v-if="message.reasoningExpanded"
+              class="mt-1 whitespace-pre-wrap border-l-2 border-theme-border pl-3 text-xs italic text-theme-text-muted"
+            >{{ message.reasoning }}</p>
+          </div>
+
           <!-- Thinking Indicator -->
           <div
-            v-if="message.thinking"
+            v-if="message.thinking && !message.reasoning"
             class="flex items-center gap-1 px-1 py-1.5"
           >
             <span
@@ -35,7 +72,7 @@
               class="h-1.5 w-1.5 animate-bounce rounded-full bg-theme-text-muted"
             ></span>
           </div>
-          <p v-else-if="!message.thinking" class="whitespace-pre-wrap">{{
+          <p v-if="!message.thinking" class="whitespace-pre-wrap">{{
             message.content
           }}<span
             v-if="message.streaming || message.pendingContent"
@@ -73,6 +110,12 @@
           >
             {{ message.editError }}
           </p>
+          <p
+            v-if="message.notice"
+            class="mt-2 text-xs text-theme-text-muted"
+          >
+            {{ message.notice }}
+          </p>
         </div>
       </div>
     </div>
@@ -99,11 +142,12 @@
 </template>
 
 <script setup>
-import { mdiArrowUp } from "@mdi/js";
+import SvgIcon from "@jamescoyle/vue-icon";
+import { mdiArrowUp, mdiChevronRight } from "@mdi/js";
 import { useToast } from "primevue/usetoast";
-import { nextTick, onBeforeUnmount, reactive, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-import { apiErrorHandler, streamChat } from "../api.js";
+import { apiErrorHandler, getChatModels, streamChat } from "../api.js";
 import { useGlobalStore } from "../globalStore.js";
 import CustomButton from "./CustomButton.vue";
 import NoteHistoryDiff from "./NoteHistoryDiff.vue";
@@ -122,8 +166,36 @@ const question = ref("");
 const messages = ref([]);
 const messageList = ref();
 const sending = ref(false);
+const models = ref([]);
+const selectedModel = ref(localStorage.getItem("chatModel") || "");
 
-// Builds the {role, content} history sent to Ollama so it has memory of
+onMounted(async () => {
+  try {
+    models.value = await getChatModels();
+  } catch (error) {
+    // Non-fatal: the send button still works against the server's default
+    // model, it's just the picker that won't be available.
+    console.error(error);
+    return;
+  }
+  const available = models.value.some(
+    (model) => model.id === selectedModel.value,
+  );
+  if (!available) {
+    selectedModel.value =
+      models.value.find((model) => model.loaded)?.id ||
+      models.value[0]?.id ||
+      "";
+  }
+});
+
+watch(selectedModel, (model) => {
+  if (model) {
+    localStorage.setItem("chatModel", model);
+  }
+});
+
+// Builds the {role, content} history sent to the model so it has memory of
 // earlier turns — without this, every message was answered in total
 // isolation, so follow-ups like "yes, add it" or "put it under Groceries"
 // had nothing to refer back to.
@@ -196,8 +268,11 @@ async function send() {
     role: "assistant",
     content: "",
     pendingContent: "",
+    reasoning: "",
+    reasoningExpanded: false,
     edit: null,
     editError: null,
+    notice: null,
     streaming: true,
     thinking: true,
     error: false,
@@ -206,32 +281,42 @@ async function send() {
   sending.value = true;
   scrollToBottom();
   try {
-    await streamChat(askedQuestion, props.noteTitle, history, (event) => {
-      if (event.type === "token") {
-        assistantMessage.thinking = false;
-        assistantMessage.pendingContent += event.content;
-        startReveal(assistantMessage);
-      } else if (event.type === "edit") {
-        assistantMessage.thinking = false;
-        assistantMessage.edit = {
-          content: event.content,
-          diff: event.diff,
-          applying: false,
-          resolved: false,
-          applied: false,
-        };
-      } else if (event.type === "edit_error") {
-        assistantMessage.thinking = false;
-        assistantMessage.editError = event.message;
-      } else if (event.type === "error") {
-        stopReveal();
-        assistantMessage.thinking = false;
-        assistantMessage.pendingContent = "";
-        assistantMessage.error = true;
-        assistantMessage.content = event.message;
-      }
-      scrollToBottom();
-    });
+    await streamChat(
+      askedQuestion,
+      props.noteTitle,
+      history,
+      selectedModel.value || null,
+      (event) => {
+        if (event.type === "token") {
+          assistantMessage.thinking = false;
+          assistantMessage.pendingContent += event.content;
+          startReveal(assistantMessage);
+        } else if (event.type === "reasoning") {
+          assistantMessage.reasoning += event.content;
+        } else if (event.type === "edit") {
+          assistantMessage.thinking = false;
+          assistantMessage.edit = {
+            content: event.content,
+            diff: event.diff,
+            applying: false,
+            resolved: false,
+            applied: false,
+          };
+        } else if (event.type === "edit_error") {
+          assistantMessage.thinking = false;
+          assistantMessage.editError = event.message;
+        } else if (event.type === "notice") {
+          assistantMessage.notice = event.message;
+        } else if (event.type === "error") {
+          stopReveal();
+          assistantMessage.thinking = false;
+          assistantMessage.pendingContent = "";
+          assistantMessage.error = true;
+          assistantMessage.content = event.message;
+        }
+        scrollToBottom();
+      },
+    );
   } catch (error) {
     stopReveal();
     assistantMessage.thinking = false;
@@ -239,7 +324,7 @@ async function send() {
     assistantMessage.error = true;
     if (error.response?.status === 503) {
       assistantMessage.content = error.message;
-      globalStore.config.ollamaEnabled = false;
+      globalStore.config.chatEnabled = false;
     } else {
       assistantMessage.content = "Something went wrong.";
       apiErrorHandler(error, toast);
@@ -257,6 +342,14 @@ async function applyEdit(message) {
   message.edit.applying = false;
   message.edit.resolved = true;
   message.edit.applied = success;
+}
+
+// Shows only the most recently streamed line of reasoning text as the
+// collapsed preview, so it reads like a live "currently thinking about..."
+// status rather than a stale first line.
+function lastReasoningLine(message) {
+  const lines = message.reasoning.split("\n").filter((line) => line.trim());
+  return lines.length ? lines[lines.length - 1] : "";
 }
 
 function scrollToBottom() {

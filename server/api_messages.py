@@ -15,5 +15,9 @@ attachment_in_use = (
 )
 history_not_found = "No history is available for the specified version."
 chat_not_configured = (
-    "Chat is not configured. Set FLATNOTES_OLLAMA_MODEL to enable it."
+    "Chat is not configured. Set FLATNOTES_LLAMACPP_MODEL to enable it."
+)
+llamacpp_unreachable = (
+    "Could not reach the llama.cpp server. Make sure it's running and "
+    "reachable."
 )

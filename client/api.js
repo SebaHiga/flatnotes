@@ -203,7 +203,22 @@ export async function deleteAttachment(filename) {
   }
 }
 
-export async function streamChat(question, noteTitle, history, onEvent) {
+export async function getChatModels() {
+  try {
+    const response = await api.get("api/chat/models");
+    return response.data;
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function streamChat(
+  question,
+  noteTitle,
+  history,
+  model,
+  onEvent,
+) {
   // Uses raw fetch rather than the axios instance above because axios
   // (1.19.0) doesn't expose a readable stream for the response body.
   const url = new URL("api/chat", document.baseURI);
@@ -219,6 +234,7 @@ export async function streamChat(question, noteTitle, history, onEvent) {
       question: question,
       noteTitle: noteTitle,
       history: history,
+      model: model,
     }),
   });
   if (!response.ok) {

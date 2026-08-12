@@ -223,7 +223,7 @@ const canModify = computed(
   () => globalStore.config.authType != authTypes.readOnly,
 );
 const showChatToggle = computed(
-  () => globalStore.config.ollamaEnabled && !isNewNote.value,
+  () => globalStore.config.chatEnabled && !isNewNote.value,
 );
 const chatPanelOpen = ref(false);
 let contentChangedTimeout = null;

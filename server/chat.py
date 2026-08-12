@@ -2,11 +2,12 @@ import base64
 import difflib
 import json
 import os
-from typing import AsyncIterator, List, Literal
+from typing import AsyncIterator, List, Literal, Optional
 
 import httpx
 import pypdf
 
+import api_messages
 from helpers import CustomBaseModel, get_env
 from logger import logger
 from notes.models import Note
@@ -18,7 +19,14 @@ MAX_ATTACHMENT_TEXT_CHARS = 4000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_IMAGES = 4
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
 TEXT_ATTACHMENT_EXTENSIONS = {
     ".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".py", ".js",
     ".ts", ".html", ".css", ".xml", ".ini", ".toml", ".sh",
@@ -113,9 +121,18 @@ class ChatRequest(CustomBaseModel):
     question: str
     note_title: str
     history: List[ChatMessage] = []
+    # Overrides the server's default FLATNOTES_LLAMACPP_MODEL for this
+    # request, letting the user pick from whatever's listed by list_models().
+    model: Optional[str] = None
 
 
-class OllamaUnavailableError(Exception):
+class ChatModelInfo(CustomBaseModel):
+    id: str
+    loaded: bool
+    vision: bool
+
+
+class LlamaCppUnavailableError(Exception):
     pass
 
 
@@ -138,10 +155,10 @@ def _extract_pdf_text(path: str) -> str:
 
 def _load_attachments(filenames: List[str]):
     """Split the given attachment filenames into (images, text_block).
-    Images are returned as base64 strings (for vision-capable models);
-    text files and PDFs (text extracted via pypdf) are concatenated into a
-    single text block. Missing, oversized, or unsupported files are
-    silently skipped."""
+    Images are returned as (mime_type, base64_str) tuples, ready to embed
+    as data URIs for vision-capable models; text files and PDFs (text
+    extracted via pypdf) are concatenated into a single text block.
+    Missing, oversized, or unsupported files are silently skipped."""
     images = []
     text_parts = []
     attachments_dir = _attachments_dir()
@@ -152,11 +169,11 @@ def _load_attachments(filenames: List[str]):
             size = os.path.getsize(path)
         except OSError:
             continue
-        if ext in IMAGE_EXTENSIONS:
+        if ext in IMAGE_MIME_TYPES:
             if len(images) >= MAX_IMAGES or size > MAX_IMAGE_BYTES:
                 continue
             with open(path, "rb") as f:
-                images.append(base64.b64encode(f.read()).decode())
+                images.append((IMAGE_MIME_TYPES[ext], base64.b64encode(f.read()).decode()))
         elif ext in TEXT_ATTACHMENT_EXTENSIONS:
             with open(path, "r", errors="replace") as f:
                 content = f.read(MAX_ATTACHMENT_TEXT_CHARS + 1)
@@ -176,11 +193,11 @@ def _load_attachments(filenames: List[str]):
 def _unescape_stray_newlines(text: str) -> str:
     """Small models occasionally emit a literal backslash-n (two chars)
     instead of an actual line break inside tool-call string arguments —
-    likely a JSON-escaping artifact, since Ollama hands back arguments
-    already parsed into a dict, so any '\\n' surviving that parse was
-    written by the model as a literal two-character sequence rather than
-    a real newline. Markdown notes essentially never contain a genuine
-    literal backslash-n, so unescaping it is safe."""
+    likely a JSON-escaping artifact, since any '\\n' surviving our
+    json.loads() of the arguments was written by the model as a literal
+    two-character sequence rather than a real newline. Markdown notes
+    essentially never contain a genuine literal backslash-n, so
+    unescaping it is safe."""
     return text.replace("\\n", "\n").replace("\\t", "\t")
 
 
@@ -210,20 +227,42 @@ def _unified_diff(old_content: str, new_content: str) -> str:
     return "\n".join(diff_lines)
 
 
-async def _model_capabilities(host: str, model: str) -> set:
-    """Query Ollama for the capabilities (e.g. 'vision', 'tools') of the
-    configured model. Returns an empty set if the probe fails, in which
-    case vision/tool features are conservatively left disabled."""
+async def list_models(host: str) -> List[ChatModelInfo]:
+    """Query llama.cpp's /v1/models for the presets it knows about, so the
+    user can pick which one to chat with. Presets are configured on the
+    llama.cpp side (e.g. via a router/llama-swap config) — this endpoint
+    only reports what's already there, it doesn't define models itself."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(f"{host.rstrip('/')}/v1/models")
+        response.raise_for_status()
+        data = response.json().get("data") or []
+    return [
+        ChatModelInfo(
+            id=model["id"],
+            loaded=(model.get("status") or {}).get("value") == "loaded",
+            vision="image"
+            in (
+                (model.get("architecture") or {}).get("input_modalities")
+                or []
+            ),
+        )
+        for model in data
+    ]
+
+
+async def _supports_vision(host: str) -> bool:
+    """Query llama.cpp for whether the currently loaded model supports
+    image input. Returns False if the probe fails, in which case images
+    are conservatively left out of the request rather than risking a
+    hard failure from a model that can't accept them."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(
-                f"{host.rstrip('/')}/api/show", json={"model": model}
-            )
+            response = await client.get(f"{host.rstrip('/')}/props")
             response.raise_for_status()
-            return set(response.json().get("capabilities", []))
+            return bool(response.json().get("modalities", {}).get("vision"))
     except (httpx.HTTPError, ValueError):
-        logger.warning("Failed to probe Ollama model capabilities", exc_info=True)
-        return set()
+        logger.warning("Failed to probe llama.cpp model modalities", exc_info=True)
+        return False
 
 
 async def stream_chat_response(
@@ -237,16 +276,14 @@ async def stream_chat_response(
     """Yield newline-delimited JSON events for a chat response grounded in
     the given note and its attachments: 'token' events with streamed text,
     an 'edit' event if the model proposes a note change, then a 'done'
-    event. Yields a single 'error' event instead if Ollama can't be
-    reached."""
+    event. Yields a single 'error' event instead if the llama.cpp server
+    can't be reached."""
     note_content = note.content or ""
     if len(note_content) > MAX_NOTE_CONTENT_CHARS:
         note_content = note_content[:MAX_NOTE_CONTENT_CHARS] + "\n...(truncated)"
 
     images, attachments_text = _load_attachments(attachment_filenames)
-    capabilities = await _model_capabilities(host, model)
-    use_tools = "tools" in capabilities
-    use_vision = "vision" in capabilities and bool(images)
+    use_vision = bool(images) and await _supports_vision(host)
 
     system_content = SYSTEM_PROMPT_TEMPLATE.format(
         title=note.title, content=note_content
@@ -262,30 +299,41 @@ async def stream_chat_response(
             "\n\n(This note has image attachments, but the current model "
             "can't read images.)"
         )
-    if use_tools:
-        system_content += (
-            "\n\nWhenever the user wants the note changed — however they "
-            "phrase it, including a casual 'yes' or 'go ahead' confirming "
-            "something discussed earlier — call the edit_note tool "
-            "instead of just describing the change in words. Never "
-            "rewrite the note from scratch: edit_note only takes a small "
-            "'find' snippet and its 'replace' text, so everything else in "
-            "the note is preserved automatically. Place additions where "
-            "they best fit the note's existing structure (e.g. next to a "
-            "similar list item, under the most relevant heading) rather "
-            "than always at the end, unless the user asked for it to be "
-            "appended. See the tool's description for the exact rules."
-        )
+    system_content += (
+        "\n\nWhenever the user wants the note changed — however they "
+        "phrase it, including a casual 'yes' or 'go ahead' confirming "
+        "something discussed earlier — call the edit_note tool "
+        "instead of just describing the change in words. Never "
+        "rewrite the note from scratch: edit_note only takes a small "
+        "'find' snippet and its 'replace' text, so everything else in "
+        "the note is preserved automatically. Place additions where "
+        "they best fit the note's existing structure (e.g. next to a "
+        "similar list item, under the most relevant heading) rather "
+        "than always at the end, unless the user asked for it to be "
+        "appended. See the tool's description for the exact rules."
+    )
 
-    user_message = {"role": "user", "content": question}
     if use_vision:
-        user_message["images"] = images
+        content_parts = [{"type": "text", "text": question}]
+        for mime_type, image_b64 in images:
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{image_b64}"},
+                }
+            )
+        user_message = {"role": "user", "content": content_parts}
+    else:
+        user_message = {"role": "user", "content": question}
 
     history_messages = [
         {"role": message.role, "content": message.content}
         for message in (history or [])[-MAX_HISTORY_MESSAGES:]
     ]
 
+    # The context window is fixed by the llama.cpp server's own --ctx-size
+    # startup flag rather than anything settable per-request, so there's no
+    # equivalent of Ollama's `options.num_ctx` to pass here.
     request_body = {
         "model": model,
         "messages": [
@@ -294,9 +342,8 @@ async def stream_chat_response(
             user_message,
         ],
         "stream": True,
+        "tools": [EDIT_NOTE_TOOL],
     }
-    if use_tools:
-        request_body["tools"] = [EDIT_NOTE_TOOL]
 
     # Edits are applied as find/replace snippets against the note's real,
     # untruncated content (not the possibly-truncated `note_content` shown
@@ -305,76 +352,101 @@ async def stream_chat_response(
     current_content = note.content or ""
     had_edit = False
 
+    # OpenAI-style streaming sends tool calls as incremental fragments
+    # (name in the first fragment, arguments dribbled out chunk by chunk)
+    # keyed by index, rather than Ollama's whole-tool-call-per-chunk
+    # format — so fragments are accumulated here and only acted on once
+    # the stream ends.
+    tool_calls_acc = {}
+
     try:
         async with httpx.AsyncClient(timeout=180) as client:
             async with client.stream(
                 "POST",
-                f"{host.rstrip('/')}/api/chat",
+                f"{host.rstrip('/')}/v1/chat/completions",
                 json=request_body,
             ) as response:
                 if response.status_code != 200:
                     body = await response.aread()
                     logger.error(
-                        f"Ollama returned {response.status_code}: {body}"
+                        f"llama.cpp returned {response.status_code}: {body}"
                     )
-                    raise OllamaUnavailableError()
+                    raise LlamaCppUnavailableError()
                 async for line in response.aiter_lines():
-                    if not line:
+                    if not line or not line.startswith("data:"):
                         continue
-                    chunk = json.loads(line)
-                    message = chunk.get("message", {})
-                    token_content = message.get("content")
+                    data = line[len("data:") :].strip()
+                    if data == "[DONE]":
+                        break
+                    chunk = json.loads(data)
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
+                    token_content = delta.get("content")
                     if token_content:
                         yield _event("token", content=token_content)
-                    for tool_call in message.get("tool_calls") or []:
-                        function = tool_call.get("function", {})
-                        if function.get("name") != "edit_note":
-                            continue
-                        arguments = function.get("arguments")
-                        if isinstance(arguments, str):
-                            try:
-                                arguments = json.loads(arguments)
-                            except ValueError:
-                                arguments = {}
-                        find = (arguments or {}).get("find")
-                        replace = (arguments or {}).get("replace")
-                        if not isinstance(find, str) or not isinstance(
-                            replace, str
-                        ):
-                            continue
-                        find = _unescape_stray_newlines(find)
-                        replace = _unescape_stray_newlines(replace)
-                        new_content, error = _apply_edit(
-                            current_content, find, replace
+                    reasoning_content = delta.get("reasoning_content")
+                    if reasoning_content:
+                        yield _event("reasoning", content=reasoning_content)
+                    for tool_call in delta.get("tool_calls") or []:
+                        index = tool_call.get("index", 0)
+                        entry = tool_calls_acc.setdefault(
+                            index, {"name": "", "arguments": ""}
                         )
-                        if error:
-                            logger.warning(
-                                f"Model proposed an unapplicable edit "
-                                f"({error}): find={find!r}"
-                            )
+                        function = tool_call.get("function") or {}
+                        if function.get("name"):
+                            entry["name"] = function["name"]
+                        if function.get("arguments"):
+                            entry["arguments"] += function["arguments"]
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason:
+                        if finish_reason == "length":
                             yield _event(
-                                "edit_error",
+                                "notice",
                                 message=(
-                                    "The AI tried to change part of the "
-                                    "note it couldn't precisely locate, so "
-                                    "that change was skipped."
+                                    "The response was cut off because it "
+                                    "reached the model's output limit."
                                 ),
                             )
-                            continue
-                        current_content = new_content
-                        had_edit = True
-                    if chunk.get("done"):
                         break
-    except (httpx.HTTPError, OllamaUnavailableError):
-        logger.warning("Failed to reach Ollama", exc_info=True)
-        yield _event(
-            "error",
-            message=(
-                "Could not reach the Ollama server. Make sure it's "
-                "running and reachable."
-            ),
-        )
+    except (httpx.HTTPError, LlamaCppUnavailableError):
+        logger.warning("Failed to reach llama.cpp", exc_info=True)
+        yield _event("error", message=api_messages.llamacpp_unreachable)
         return
+
+    for index in sorted(tool_calls_acc):
+        entry = tool_calls_acc[index]
+        if entry["name"] != "edit_note":
+            continue
+        try:
+            arguments = json.loads(entry["arguments"] or "{}")
+        except ValueError:
+            arguments = {}
+        find = (arguments or {}).get("find")
+        replace = (arguments or {}).get("replace")
+        if not isinstance(find, str) or not isinstance(replace, str):
+            continue
+        find = _unescape_stray_newlines(find)
+        replace = _unescape_stray_newlines(replace)
+        new_content, error = _apply_edit(current_content, find, replace)
+        if error:
+            logger.warning(
+                f"Model proposed an unapplicable edit ({error}): "
+                f"find={find!r}"
+            )
+            yield _event(
+                "edit_error",
+                message=(
+                    "The AI tried to change part of the note it "
+                    "couldn't precisely locate, so that change was "
+                    "skipped."
+                ),
+            )
+            continue
+        current_content = new_content
+        had_edit = True
 
     if had_edit:
         yield _event(
