@@ -1,13 +1,26 @@
 <template>
   <div class="flex h-full flex-col">
-    <div v-if="models.length > 1" class="mb-2 flex items-center gap-1">
+    <div class="mb-2 flex items-center gap-1">
       <select
+        v-if="models.length > 1"
         v-model="selectedModel"
         class="w-full truncate rounded border border-theme-border bg-theme-background px-1 py-0.5 text-xs text-theme-text-muted focus:outline-none dark:bg-theme-background-elevated"
       >
         <option v-for="model in models" :key="model.id" :value="model.id">
           {{ model.id }}{{ model.loaded ? "" : " (cold start)"
           }}{{ model.vision ? "" : " — no images" }}
+        </option>
+      </select>
+      <select
+        v-model="selectedReasoningEffort"
+        class="w-full truncate rounded border border-theme-border bg-theme-background px-1 py-0.5 text-xs text-theme-text-muted focus:outline-none dark:bg-theme-background-elevated"
+      >
+        <option
+          v-for="level in reasoningEffortLevels"
+          :key="level.value"
+          :value="level.value"
+        >
+          {{ level.label }}
         </option>
       </select>
     </div>
@@ -31,6 +44,20 @@
             'text-theme-danger': message.error,
           }"
         >
+          <!-- Attached Images -->
+          <div
+            v-if="message.attachments?.length"
+            class="mb-1 flex flex-wrap gap-1"
+          >
+            <img
+              v-for="attachment in message.attachments"
+              :key="attachment.filename"
+              :src="attachment.url"
+              :alt="attachment.filename"
+              class="h-16 w-16 rounded object-cover"
+            />
+          </div>
+
           <!-- Reasoning -->
           <div v-if="message.reasoning" class="mb-1 max-w-full">
             <button
@@ -54,7 +81,9 @@
             <p
               v-if="message.reasoningExpanded"
               class="mt-1 whitespace-pre-wrap border-l-2 border-theme-border pl-3 text-xs italic text-theme-text-muted"
-            >{{ message.reasoning }}</p>
+            >
+              {{ message.reasoning }}
+            </p>
           </div>
 
           <!-- Thinking Indicator -->
@@ -72,13 +101,14 @@
               class="h-1.5 w-1.5 animate-bounce rounded-full bg-theme-text-muted"
             ></span>
           </div>
-          <p v-if="!message.thinking" class="whitespace-pre-wrap">{{
-            message.content
-          }}<span
-            v-if="message.streaming || message.pendingContent"
-            class="animate-pulse"
-            >▍</span
-          ></p>
+          <p v-if="!message.thinking" class="whitespace-pre-wrap">
+            {{ message.content
+            }}<span
+              v-if="message.streaming || message.pendingContent"
+              class="animate-pulse"
+              >▍</span
+            >
+          </p>
 
           <!-- Proposed Edit -->
           <div v-if="message.edit" class="mt-2 max-w-[420px]">
@@ -110,18 +140,50 @@
           >
             {{ message.editError }}
           </p>
-          <p
-            v-if="message.notice"
-            class="mt-2 text-xs text-theme-text-muted"
-          >
+          <p v-if="message.notice" class="mt-2 text-xs text-theme-text-muted">
             {{ message.notice }}
           </p>
         </div>
       </div>
     </div>
 
+    <!-- Pending Image Attachments -->
+    <div v-if="pendingAttachments.length" class="mb-1 flex flex-wrap gap-1">
+      <div
+        v-for="(attachment, index) in pendingAttachments"
+        :key="attachment.filename"
+        class="relative"
+      >
+        <img
+          :src="attachment.url"
+          :alt="attachment.filename"
+          class="h-12 w-12 rounded object-cover"
+        />
+        <button
+          type="button"
+          class="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-theme-border bg-theme-background"
+          @click="pendingAttachments.splice(index, 1)"
+        >
+          <SvgIcon type="mdi" :path="mdiClose" :size="12"></SvgIcon>
+        </button>
+      </div>
+    </div>
+
     <!-- Input -->
     <div class="flex items-end gap-2">
+      <input
+        ref="imageInput"
+        type="file"
+        accept="image/*"
+        multiple
+        class="hidden"
+        @change="fileInputHandler"
+      />
+      <CustomButton
+        :iconPath="mdilPaperclip"
+        :disabled="sending"
+        @click="imageInput.click()"
+      />
       <textarea
         v-model="question"
         v-focus
@@ -129,12 +191,13 @@
         :placeholder="`Ask about '${noteTitle}'...`"
         class="w-full resize-none rounded-md border border-theme-border bg-theme-background px-3 py-2 focus:outline-none dark:bg-theme-background-elevated"
         @keydown.enter.exact.prevent="send"
+        @paste="pasteHandler"
       ></textarea>
       <CustomButton
         :iconPath="mdiArrowUp"
         label="Send"
         :style="'cta'"
-        :disabled="sending || !question.trim()"
+        :disabled="sending || attaching || !question.trim()"
         @click="send"
       />
     </div>
@@ -143,14 +206,32 @@
 
 <script setup>
 import SvgIcon from "@jamescoyle/vue-icon";
-import { mdiArrowUp, mdiChevronRight } from "@mdi/js";
+import { mdiArrowUp, mdiChevronRight, mdiClose } from "@mdi/js";
+import { mdilPaperclip } from "@mdi/light-js";
 import { useToast } from "primevue/usetoast";
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import {
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 
-import { apiErrorHandler, getChatModels, streamChat } from "../api.js";
+import {
+  apiErrorHandler,
+  createAttachment,
+  getChatModels,
+  streamChat,
+} from "../api.js";
 import { useGlobalStore } from "../globalStore.js";
+import { getFilesFromEvent, getToastOptions, isImageFile } from "../helpers.js";
 import CustomButton from "./CustomButton.vue";
 import NoteHistoryDiff from "./NoteHistoryDiff.vue";
+
+// Mirrors server/chat.py's MAX_IMAGES — attaching more than the server will
+// actually forward to the model would just be silently dropped there.
+const MAX_CHAT_IMAGES = 4;
 
 const props = defineProps({
   noteTitle: { type: String, required: true },
@@ -168,6 +249,24 @@ const messageList = ref();
 const sending = ref(false);
 const models = ref([]);
 const selectedModel = ref(localStorage.getItem("chatModel") || "");
+
+// "" is sent to the server as null, meaning "leave the model's own default
+// thinking behaviour alone" rather than an explicit level.
+const reasoningEffortLevels = [
+  { value: "", label: "Default reasoning" },
+  { value: "off", label: "No reasoning" },
+  { value: "low", label: "Low reasoning" },
+  { value: "medium", label: "Medium reasoning" },
+  { value: "high", label: "High reasoning" },
+  { value: "max", label: "Max reasoning" },
+];
+const selectedReasoningEffort = ref(
+  localStorage.getItem("chatReasoningEffort") || "",
+);
+
+const imageInput = ref();
+const pendingAttachments = ref([]); // [{filename, url}] — uploaded, not yet sent
+const attaching = ref(false);
 
 onMounted(async () => {
   try {
@@ -193,6 +292,10 @@ watch(selectedModel, (model) => {
   if (model) {
     localStorage.setItem("chatModel", model);
   }
+});
+
+watch(selectedReasoningEffort, (level) => {
+  localStorage.setItem("chatReasoningEffort", level);
 });
 
 // Builds the {role, content} history sent to the model so it has memory of
@@ -251,14 +354,96 @@ function startReveal(message) {
 
 onBeforeUnmount(stopReveal);
 
+// Lets a question be asked about an image without first embedding it in
+// the note itself — uploaded the same way note attachments are (so the
+// server's existing vision pipeline in chat.py just picks it up), but only
+// referenced by this one question via chatAttachmentFilenames rather than
+// inserted into the note's markdown.
+function fileInputHandler(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = "";
+  if (files.length > 0) {
+    attachImages(files);
+  }
+}
+
+function pasteHandler(event) {
+  const files = getFilesFromEvent(event);
+  if (files.length === 0) {
+    // No real files (plain text paste): leave the event alone so the
+    // textarea's own paste handling runs as normal.
+    return;
+  }
+  event.preventDefault();
+  attachImages(files);
+}
+
+async function attachImages(files) {
+  const images = files.filter(isImageFile);
+  if (images.length < files.length) {
+    toast.add(
+      getToastOptions(
+        "Only image files can be attached to a question.",
+        "Unsupported file",
+        "warn",
+      ),
+    );
+  }
+  const room = MAX_CHAT_IMAGES - pendingAttachments.value.length;
+  if (room <= 0) {
+    toast.add(
+      getToastOptions(
+        `Only up to ${MAX_CHAT_IMAGES} images can be attached to a question.`,
+        "Too many images",
+        "warn",
+      ),
+    );
+    return;
+  }
+  attaching.value = true;
+  try {
+    await Promise.all(images.slice(0, room).map(uploadImage));
+  } finally {
+    attaching.value = false;
+  }
+}
+
+async function uploadImage(file) {
+  try {
+    const data = await createAttachment(file);
+    pendingAttachments.value.push({ filename: data.filename, url: data.url });
+  } catch (error) {
+    if (error.response?.status === 409) {
+      toast.add(
+        getToastOptions(
+          "An attachment with this filename already exists.",
+          "Duplicate",
+          "error",
+        ),
+      );
+    } else if (error.response?.status === 413) {
+      toast.add(
+        getToastOptions(
+          `"${file.name}" is too large to upload.`,
+          "File too large",
+          "error",
+        ),
+      );
+    } else {
+      apiErrorHandler(error, toast);
+    }
+  }
+}
+
 async function send() {
   const askedQuestion = question.value.trim();
-  if (!askedQuestion || sending.value) {
+  if (!askedQuestion || sending.value || attaching.value) {
     return;
   }
   question.value = "";
+  const attachments = pendingAttachments.value.splice(0);
   const history = buildHistory();
-  messages.value.push({ role: "user", content: askedQuestion });
+  messages.value.push({ role: "user", content: askedQuestion, attachments });
   // Reactive so mutations made from the streamChat callback below (holding
   // this same closure reference, not one re-fetched from `messages.value`)
   // actually trigger re-renders — a plain object here would update its
@@ -286,6 +471,8 @@ async function send() {
       props.noteTitle,
       history,
       selectedModel.value || null,
+      selectedReasoningEffort.value || null,
+      attachments.map((attachment) => attachment.filename),
       (event) => {
         if (event.type === "token") {
           assistantMessage.thinking = false;

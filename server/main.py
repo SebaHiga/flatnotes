@@ -361,7 +361,7 @@ def post_chat(data: chat.ChatRequest):
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
     references = note_storage.get_attachment_references()
-    attachment_filenames = [
+    note_attachment_filenames = [
         filename
         for filename, titles in references.items()
         if note.title in titles
@@ -372,8 +372,10 @@ def post_chat(data: chat.ChatRequest):
             data.model or global_config.llamacpp_model,
             data.question,
             note,
-            attachment_filenames,
+            note_attachment_filenames,
+            data.chat_attachment_filenames,
             data.history,
+            data.reasoning_effort,
         ),
         media_type="application/x-ndjson",
     )

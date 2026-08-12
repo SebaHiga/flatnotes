@@ -217,6 +217,8 @@ export async function streamChat(
   noteTitle,
   history,
   model,
+  reasoningEffort,
+  attachmentFilenames,
   onEvent,
 ) {
   // Uses raw fetch rather than the axios instance above because axios
@@ -235,6 +237,8 @@ export async function streamChat(
       noteTitle: noteTitle,
       history: history,
       model: model,
+      reasoningEffort: reasoningEffort,
+      chatAttachmentFilenames: attachmentFilenames,
     }),
   });
   if (!response.ok) {
