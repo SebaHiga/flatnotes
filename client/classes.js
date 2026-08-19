@@ -20,10 +20,19 @@ class Note {
 class SearchResult extends Note {
   constructor(searchResult) {
     super(searchResult);
+    this.created = searchResult.created;
     this.score = searchResult.score;
     this.titleHighlights = searchResult.titleHighlights;
     this.contentHighlights = searchResult.contentHighlights;
     this.tagMatches = searchResult.tagMatches;
+  }
+
+  get createdAsDate() {
+    return new Date(this.created * 1000);
+  }
+
+  get createdAsString() {
+    return this.createdAsDate.toLocaleString();
   }
 
   get titleHighlightsOrTitle() {

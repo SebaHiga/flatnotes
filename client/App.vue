@@ -1,7 +1,7 @@
 <template>
   <LoadingIndicator
     ref="loadingIndicator"
-    class="container mx-auto flex h-screen flex-col overflow-hidden px-2 py-4 print:max-w-full"
+    class="flex h-screen flex-col overflow-hidden px-4 py-4 print:max-w-full"
   >
     <PrimeToast />
     <SearchModal v-model="isSearchModalVisible" />

@@ -296,7 +296,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
 )
 def search(
     term: str,
-    sort: Literal["score", "title", "lastModified"] = "score",
+    sort: Literal["score", "title", "lastModified", "created"] = "score",
     order: Literal["asc", "desc"] = "desc",
     limit: int = None,
     fuzzy: bool = False,

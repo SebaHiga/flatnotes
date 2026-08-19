@@ -1,87 +1,132 @@
 <template>
-  <div class="flex h-full justify-center">
-    <div class="flex max-w-[500px] flex-1 flex-col items-center pt-[25vh]">
-      <Logo class="mb-5" />
-      <SearchInput class="mb-5 shadow-[0_0_20px] shadow-theme-shadow" />
-      <LoadingIndicator
-        ref="loadingIndicator"
-        class="flex min-h-56 flex-col items-center"
-        hideLoader
+  <!-- Add/Edit Column Modal -->
+  <DashboardColumnEditModal
+    v-model="isEditModalVisible"
+    :column="editingColumn"
+    :isNew="isNewColumn"
+    @save="saveColumn"
+    @delete="deleteColumn"
+  />
+
+  <div class="flex h-full flex-col overflow-hidden">
+    <!-- Top Bar -->
+    <div class="mb-4 flex shrink-0 items-center gap-4">
+      <Logo responsive />
+      <SearchInput class="max-w-[500px] flex-1" />
+    </div>
+
+    <!-- Dashboard -->
+    <div class="flex min-h-0 flex-1 flex-col">
+      <div class="mb-3 flex shrink-0 items-center justify-between">
+        <h2 class="text-xs font-bold uppercase text-theme-text-very-muted">
+          Dashboard
+        </h2>
+        <CustomButton
+          label="Add Column"
+          :iconPath="mdiPlus"
+          @click="addColumn"
+        />
+      </div>
+      <div
+        v-if="columns.length === 0"
+        class="text-sm text-theme-text-very-muted"
       >
-        <p
-          v-if="notes.length > 0"
-          class="mb-2 text-xs font-bold uppercase text-theme-text-very-muted"
-        >
-          {{ globalStore.config.quickAccessTitle }}
-        </p>
-        <RouterLink
-          v-for="note in notes.slice(0, globalStore.config.quickAccessLimit)"
-          :to="{ name: 'note', params: { title: note.title } }"
-          class="mb-1"
-        >
-          <CustomButton :label="note.title" />
-        </RouterLink>
-        <RouterLink
-          v-if="notes.length > globalStore.config.quickAccessLimit"
-          :to="{
-            name: 'search',
-            query: {
-              term: globalStore.config.quickAccessTerm,
-              sortBy: searchSortOptions[globalStore.config.quickAccessSort],
-            },
-          }"
-          title="Show more"
-          ><CustomButton :iconPath="mdiDotsHorizontal"
-        /></RouterLink>
-      </LoadingIndicator>
+        No columns yet. Click "Add Column" to build your dashboard.
+      </div>
+      <div
+        v-else
+        class="flex min-h-0 flex-1 flex-wrap content-start gap-4 overflow-y-auto pb-2"
+      >
+        <DashboardColumn
+          v-for="(column, index) in columns"
+          :key="column.id"
+          :column="column"
+          draggable="true"
+          class="transition-opacity"
+          :class="{ 'opacity-40': draggedIndex === index }"
+          @edit="editColumn(column)"
+          @dragstart="dragStartHandler(index, $event)"
+          @dragover.prevent="dragOverHandler(index)"
+          @drop.prevent
+          @dragend="dragEndHandler"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { mdiDotsHorizontal } from "@mdi/js";
-import { useToast } from "primevue/usetoast";
-import { onMounted, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { mdiPlus } from "@mdi/js";
+import { ref } from "vue";
 
-import { apiErrorHandler, getNotes } from "../api.js";
 import CustomButton from "../components/CustomButton.vue";
-import LoadingIndicator from "../components/LoadingIndicator.vue";
 import Logo from "../components/Logo.vue";
-import { searchSortOptions } from "../constants.js";
-import { useGlobalStore } from "../globalStore.js";
+import { loadColumns, newColumn, saveColumns } from "../dashboardColumns.js";
+import DashboardColumn from "../partials/DashboardColumn.vue";
+import DashboardColumnEditModal from "../partials/DashboardColumnEditModal.vue";
 import SearchInput from "../partials/SearchInput.vue";
 
-const globalStore = useGlobalStore();
-const loadingIndicator = ref();
-const notes = ref([]);
-const toast = useToast();
+// Dashboard columns
 
-function init() {
-  if (globalStore.config.quickAccessHide) {
-    return;
-  }
-  getNotes(
-    globalStore.config.quickAccessTerm,
-    globalStore.config.quickAccessSort,
-    // Order by ascending if sorting by title, descending otherwise.
-    globalStore.config.quickAccessSort === "title"
-      ? "asc"
-      : "desc",
-    // Limit is increased by 1 to check if there are more notes than the limit.
-    globalStore.config.quickAccessLimit + 1,
-  )
-    .then((data) => {
-      notes.value = data;
-      loadingIndicator.value.setLoaded();
-    })
-    .catch((error) => {
-      loadingIndicator.value.setFailed();
-      apiErrorHandler(error, toast);
-    });
+const columns = ref(loadColumns([newColumn({ title: "Recent" })]));
+const editingColumn = ref(newColumn());
+const isNewColumn = ref(false);
+const isEditModalVisible = ref(false);
+const draggedIndex = ref(null);
+
+function persistColumns() {
+  saveColumns(columns.value);
 }
 
-// Watch to allow for delayed config load.
-watch(() => globalStore.config.hideRecentlyModified, init);
-onMounted(init);
+function dragStartHandler(index, event) {
+  draggedIndex.value = index;
+  event.dataTransfer.effectAllowed = "move";
+  // Required by Firefox for the drag to start at all.
+  event.dataTransfer.setData("text/plain", "");
+}
+
+// Reorders live as the dragged column passes over another, rather than only
+// on drop, so the layout previews the new order while dragging.
+function dragOverHandler(index) {
+  if (draggedIndex.value === null || draggedIndex.value === index) {
+    return;
+  }
+  const reordered = [...columns.value];
+  const [moved] = reordered.splice(draggedIndex.value, 1);
+  reordered.splice(index, 0, moved);
+  columns.value = reordered;
+  draggedIndex.value = index;
+}
+
+function dragEndHandler() {
+  draggedIndex.value = null;
+  persistColumns();
+}
+
+function addColumn() {
+  editingColumn.value = newColumn();
+  isNewColumn.value = true;
+  isEditModalVisible.value = true;
+}
+
+function editColumn(column) {
+  editingColumn.value = column;
+  isNewColumn.value = false;
+  isEditModalVisible.value = true;
+}
+
+function saveColumn(updated) {
+  const index = columns.value.findIndex((column) => column.id === updated.id);
+  if (index === -1) {
+    columns.value.push(updated);
+  } else {
+    columns.value[index] = updated;
+  }
+  persistColumns();
+}
+
+function deleteColumn(id) {
+  columns.value = columns.value.filter((column) => column.id !== id);
+  persistColumns();
+}
 </script>

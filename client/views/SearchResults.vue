@@ -44,10 +44,12 @@
             <span v-html="result.titleHighlightsOrTitle" class="mr-2"></span>
             <Tag v-for="tag in result.tagMatches" :tag="tag" class="mr-1" />
           </div>
-          <!-- Last Modified and Content Highlights -->
+          <!-- Last Modified/Created and Content Highlights -->
           <div>
             <span class="text-theme-text-muted">{{
-              result.lastModifiedAsString
+              props.sortBy === searchSortOptions.created
+                ? result.createdAsString
+                : result.lastModifiedAsString
             }}</span>
             <span v-if="result.contentHighlights"> - </span>
             <span
@@ -96,6 +98,7 @@ const sortByName = computed(() => {
   const sortOptionNames = {
     [searchSortOptions.title]: "Title",
     [searchSortOptions.lastModified]: "Last Modified",
+    [searchSortOptions.created]: "Created",
     [searchSortOptions.score]: "Score",
   };
   return sortOptionNames[props.sortBy];
@@ -130,6 +133,8 @@ function sortResults(results) {
     return results.sort((a, b) => a.title.localeCompare(b.title));
   } else if (props.sortBy === searchSortOptions.lastModified) {
     return results.sort((a, b) => b.lastModified - a.lastModified);
+  } else if (props.sortBy === searchSortOptions.created) {
+    return results.sort((a, b) => b.created - a.created);
   } else {
     return results.sort((a, b) => b.score - a.score);
   }
@@ -189,6 +194,12 @@ const menuItems = [
     label: "Sort By: Last Modified",
     command: () => {
       updateSortByParam(searchSortOptions.lastModified);
+    },
+  },
+  {
+    label: "Sort By: Created",
+    command: () => {
+      updateSortByParam(searchSortOptions.created);
     },
   },
 ];

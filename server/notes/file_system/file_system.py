@@ -27,7 +27,7 @@ from ..base import BaseNotes
 from ..models import Note, NoteCreate, NoteUpdate, SearchResult
 
 MARKDOWN_EXT = ".md"
-INDEX_SCHEMA_VERSION = "5"
+INDEX_SCHEMA_VERSION = "6"
 # Cap on how much of a note's content is scored during fuzzy search, to
 # bound the cost of the subsequence DP for very large notes.
 MAX_FUZZY_CONTENT_CHARS = 20000
@@ -38,6 +38,13 @@ StemmingFoldingAnalyzer = StemmingAnalyzer() | CharsetFilter(accent_map)
 class IndexSchema(SchemaClass):
     filename = ID(unique=True, stored=True)
     last_modified = DATETIME(stored=True, sortable=True)
+    # Best-known creation date. There's no true creation timestamp available
+    # (the filesystem doesn't expose reliable birth times on Linux, and
+    # notes aren't otherwise tracked before they're first indexed), so this
+    # is backfilled from last_modified the first time a note is indexed and
+    # then preserved across every later re-index of that same filename (see
+    # _sync_index/_add_note_to_index).
+    created = DATETIME(stored=True, sortable=True)
     title = TEXT(
         field_boost=2.0, analyzer=StemmingFoldingAnalyzer, sortable=True
     )
@@ -116,7 +123,7 @@ class FileSystemNotes(BaseNotes):
     def search(
         self,
         term: str,
-        sort: Literal["score", "title", "last_modified"] = "score",
+        sort: Literal["score", "title", "last_modified", "created"] = "score",
         order: Literal["asc", "desc"] = "desc",
         limit: int = None,
         fuzzy: bool = False,
@@ -148,7 +155,7 @@ class FileSystemNotes(BaseNotes):
             # Note: For the 'sort' option, "score" is converted to None as
             # that is the default for searches anyway and it's quicker for
             # Whoosh if you specify None.
-            sort = sort if sort in ["title", "last_modified"] else None
+            sort = sort if sort in ["title", "last_modified", "created"] else None
 
             # Determine Sort Direction
             # Note: Confusingly, when sorting by 'score', reverse = True means
@@ -171,7 +178,7 @@ class FileSystemNotes(BaseNotes):
         self,
         term: str,
         include_content: bool,
-        sort: Literal["score", "title", "last_modified"],
+        sort: Literal["score", "title", "last_modified", "created"],
         order: Literal["asc", "desc"],
         limit: int,
     ) -> Tuple[SearchResult, ...]:
@@ -216,6 +223,7 @@ class FileSystemNotes(BaseNotes):
                     SearchResult(
                         title=title,
                         last_modified=stored["last_modified"].timestamp(),
+                        created=stored["created"].timestamp(),
                         score=score,
                         title_highlights=title_highlights,
                         content_highlights=content_highlights,
@@ -230,6 +238,8 @@ class FileSystemNotes(BaseNotes):
             results.sort(
                 key=lambda result: result.last_modified, reverse=reverse
             )
+        elif sort == "created":
+            results.sort(key=lambda result: result.created, reverse=reverse)
         else:
             results.sort(key=lambda result: result.score, reverse=reverse)
 
@@ -306,16 +316,22 @@ class FileSystemNotes(BaseNotes):
             return (content, set())
 
     def _add_note_to_index(
-        self, writer: writing.IndexWriter, note: Note
+        self, writer: writing.IndexWriter, note: Note, created: float = None
     ) -> None:
         """Add a Note object to the index using the given writer. If the
         filename already exists in the index an update will be performed
-        instead."""
+        instead. `created` is the timestamp to record as the note's created
+        date; omit it to backfill from the note's last_modified (used when a
+        filename is being indexed for the first time and no better date is
+        known)."""
         content_ex_tags, tag_set = self._extract_tags(note.content)
         tag_string = " ".join(tag_set)
         writer.update_document(
             filename=note.title + MARKDOWN_EXT,
             last_modified=datetime.fromtimestamp(note.last_modified),
+            created=datetime.fromtimestamp(
+                created if created is not None else note.last_modified
+            ),
             title=note.title,
             content=content_ex_tags,
             tags=tag_string,
@@ -334,6 +350,16 @@ class FileSystemNotes(BaseNotes):
         """Synchronize the index with the notes directory.
         Specify clean=True to completely rebuild the index"""
         indexed = set()
+        # A rename shows up here as one filename disappearing and another
+        # appearing, with no way to tell they're the same note other than
+        # renaming (a plain os.rename) leaving last_modified untouched. So
+        # deleted entries are kept around keyed by their last_modified and,
+        # when a "new" file turns out to share that exact mtime, its created
+        # date is carried over instead of being backfilled as if it were a
+        # brand new note. Content changed in the same request as the rename
+        # will change the mtime and defeat this match, in which case created
+        # falls back to being backfilled like any other new filename.
+        removed_created_by_mtime: Dict[datetime, datetime] = {}
         writer = self.index.writer()
         if clean:
             writer.mergetype = writing.CLEAR  # Clear the index
@@ -344,6 +370,9 @@ class FileSystemNotes(BaseNotes):
                 # Delete missing
                 if not os.path.exists(idx_filepath):
                     writer.delete_by_term("filename", idx_filename)
+                    removed_created_by_mtime[idx_note["last_modified"]] = (
+                        idx_note["created"]
+                    )
                     logger.info(f"'{idx_filename}' removed from index")
                 # Update modified
                 elif (
@@ -352,7 +381,9 @@ class FileSystemNotes(BaseNotes):
                 ):
                     logger.info(f"'{idx_filename}' updated")
                     self._add_note_to_index(
-                        writer, self._get_by_filename(idx_filename)
+                        writer,
+                        self._get_by_filename(idx_filename),
+                        created=idx_note["created"].timestamp(),
                     )
                     indexed.add(idx_filename)
                 # Ignore already indexed
@@ -361,8 +392,18 @@ class FileSystemNotes(BaseNotes):
         # Add new
         for filename in self._list_all_note_filenames():
             if filename not in indexed:
+                note = self._get_by_filename(filename)
+                carried_over_created = removed_created_by_mtime.pop(
+                    datetime.fromtimestamp(note.last_modified), None
+                )
                 self._add_note_to_index(
-                    writer, self._get_by_filename(filename)
+                    writer,
+                    note,
+                    created=(
+                        carried_over_created.timestamp()
+                        if carried_over_created is not None
+                        else None
+                    ),
                 )
                 logger.info(f"'{filename}' added to index")
         writer.commit(optimize=optimize)
@@ -425,6 +466,7 @@ class FileSystemNotes(BaseNotes):
 
         title = self._strip_ext(hit["filename"])
         last_modified = hit["last_modified"].timestamp()
+        created = hit["created"].timestamp()
 
         # If the search was ordered using a text field then hit.score is the
         # value of that field. This isn't useful so only set self._score if it
@@ -457,6 +499,7 @@ class FileSystemNotes(BaseNotes):
         return SearchResult(
             title=title,
             last_modified=last_modified,
+            created=created,
             score=score,
             title_highlights=title_highlights,
             content_highlights=content_highlights,

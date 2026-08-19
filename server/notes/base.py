@@ -29,7 +29,7 @@ class BaseNotes(ABC):
     def search(
         self,
         term: str,
-        sort: Literal["score", "title", "last_modified"] = "score",
+        sort: Literal["score", "title", "last_modified", "created"] = "score",
         order: Literal["asc", "desc"] = "desc",
         limit: int = None,
         fuzzy: bool = False,

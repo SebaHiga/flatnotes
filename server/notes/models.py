@@ -38,6 +38,7 @@ class NoteUpdate(CustomBaseModel):
 class SearchResult(CustomBaseModel):
     title: str
     last_modified: float
+    created: float
 
     score: Optional[float] = Field(None)
     title_highlights: Optional[str] = Field(None)
