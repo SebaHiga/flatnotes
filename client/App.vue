@@ -1,7 +1,7 @@
 <template>
   <LoadingIndicator
     ref="loadingIndicator"
-    class="flex h-screen flex-col overflow-hidden px-4 py-4 print:max-w-full"
+    class="flex h-screen flex-col overflow-hidden px-4 py-4 print:h-auto print:overflow-visible print:max-w-full"
   >
     <PrimeToast />
     <SearchModal v-model="isSearchModalVisible" />
@@ -14,7 +14,7 @@
       @toggleSearchModal="toggleSearchModal"
       @toggleTemplatePicker="toggleTemplatePicker"
     />
-    <div class="min-h-0 flex-1 overflow-hidden">
+    <div class="min-h-0 flex-1 overflow-hidden print:overflow-visible">
       <RouterView />
     </div>
   </LoadingIndicator>

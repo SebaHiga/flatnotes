@@ -8,14 +8,20 @@ const customHTMLRenderer = {
   // SVG after the surrounding HTML has been mounted into the DOM.
   codeBlock(node, { origin }) {
     const language = node.info?.trim().split(/\s+/)[0]?.toLowerCase();
-    if (language !== "mermaid") {
-      return origin();
+    if (language === "mermaid") {
+      return [
+        { type: "openTag", tagName: "div", classNames: ["mermaid"] },
+        { type: "text", content: node.literal },
+        { type: "closeTag", tagName: "div" },
+      ];
     }
-    return [
-      { type: "openTag", tagName: "div", classNames: ["mermaid"] },
-      { type: "text", content: node.literal },
-      { type: "closeTag", tagName: "div" },
-    ];
+    if (language === "pagebreak") {
+      return [
+        { type: "openTag", tagName: "div", classNames: ["page-break"] },
+        { type: "closeTag", tagName: "div" },
+      ];
+    }
+    return origin();
   },
   // Add id attribute to headings
   heading(node, { entering, getChildrenText, origin }) {

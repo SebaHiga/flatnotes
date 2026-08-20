@@ -76,3 +76,43 @@
         font-size: 16px;
     }
 }
+
+@media print {
+    @page {
+        margin: 2cm;
+    }
+
+    /* The app shell is a fixed-viewport SPA (html/body locked to 100% height
+       with overflow hidden, see the base rule above) so the note content can
+       scroll internally on screen. Printing needs the opposite: content has
+       to be allowed to grow to its full height so the browser can paginate
+       it, otherwise only whatever currently fits in the viewport prints. */
+    html,
+    body {
+        height: auto;
+        overflow: visible;
+    }
+
+    /* Explicit page-break marker, produced from a ```pagebreak fenced code
+       block by baseOptions.js (or droppable directly into markdown as raw
+       HTML, since commonmark passes it through untouched). */
+    .page-break {
+        break-after: page;
+        page-break-after: always;
+    }
+
+    /* Avoid splitting these elements awkwardly across a page boundary. */
+    .toast-viewer h1,
+    .toast-viewer h2,
+    .toast-viewer h3,
+    .toast-viewer h4,
+    .toast-viewer h5,
+    .toast-viewer h6,
+    .toast-viewer img,
+    .toast-viewer pre,
+    .toast-viewer table,
+    .toast-viewer blockquote {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+}

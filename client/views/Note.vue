@@ -38,7 +38,10 @@
     "
   />
 
-  <LoadingIndicator ref="loadingIndicator" class="flex h-full flex-col">
+  <LoadingIndicator
+    ref="loadingIndicator"
+    class="flex h-full flex-col print:h-auto"
+  >
     <!-- Header -->
     <div class="flex flex-col">
       <!-- Title -->
@@ -88,6 +91,13 @@
             :iconPath="mdiHistory"
             @click="historyHandler"
           />
+          <!-- Export PDF Button -->
+          <CustomButton
+            v-show="!isNewNote"
+            label="Export PDF"
+            :iconPath="mdiFilePdfBox"
+            @click="exportPdfHandler"
+          />
           <!-- Delete Button -->
           <CustomButton
             v-show="canModify && !isNewNote"
@@ -131,7 +141,9 @@
 
     <!-- Content -->
     <div class="flex min-h-0 flex-1 gap-4">
-      <div class="min-w-0 flex-1 overflow-y-auto">
+      <div
+        class="min-w-0 flex-1 overflow-y-auto print:overflow-visible print:h-auto"
+      >
         <ToastViewer
           v-if="!editMode"
           :initialValue="note.content"
@@ -186,7 +198,7 @@
 </style>
 
 <script setup>
-import { mdiHistory, mdiNoteOffOutline } from "@mdi/js";
+import { mdiFilePdfBox, mdiHistory, mdiNoteOffOutline } from "@mdi/js";
 import { mdilContentSave, mdilDelete, mdilPaperclip } from "@mdi/light-js";
 import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
@@ -394,6 +406,11 @@ async function applyChatEdit(newContent) {
 // Note History
 function historyHandler() {
   router.push({ name: "note-history", params: { title: note.value.title } });
+}
+
+// PDF Export
+function exportPdfHandler() {
+  window.print();
 }
 
 // Note Deletion
